@@ -1,0 +1,251 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Settings - Andikar Admin{% endblock %}
+
+{% block header %}System Settings{% endblock %}
+
+{% block content %}
+<div class="row">
+    <!-- Environment Settings -->
+    <div class="col-lg-6">
+        <div class="card mb-4">
+            <div class="card-header">
+                <i class="fas fa-sliders-h me-2"></i> Environment Settings
+            </div>
+            <div class="card-body">
+                <div class="list-group">
+                    <div class="list-group-item d-flex justify-content-between align-items-center">
+                        <div>
+                            <div class="fw-bold">Humanizer API URL</div>
+                            <div class="text-muted small">External service for humanizing text</div>
+                        </div>
+                        <div class="text-end">
+                            <code>{{ settings.HUMANIZER_API_URL }}</code>
+                        </div>
+                    </div>
+                    
+                    <div class="list-group-item d-flex justify-content-between align-items-center">
+                        <div>
+                            <div class="fw-bold">AI Detector API URL</div>
+                            <div class="text-muted small">External service for detecting AI content</div>
+                        </div>
+                        <div class="text-end">
+                            <code>{{ settings.AI_DETECTOR_API_URL }}</code>
+                        </div>
+                    </div>
+                    
+                    <div class="list-group-item d-flex justify-content-between align-items-center">
+                        <div>
+                            <div class="fw-bold">M-Pesa Integration</div>
+                            <div class="text-muted small">Payment processing service</div>
+                        </div>
+                        <div class="text-end">
+                            {% if settings.MPESA_CONFIGURED %}
+                            <span class="badge bg-success">Configured</span>
+                            {% else %}
+                            <span class="badge bg-warning">Not Configured</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    
+                    <div class="list-group-item d-flex justify-content-between align-items-center">
+                        <div>
+                            <div class="fw-bold">Rate Limiting</div>
+                            <div class="text-muted small">API request rate limiting settings</div>
+                        </div>
+                        <div class="text-end">
+                            <code>{{ settings.RATE_LIMIT_REQUESTS }}/{{ settings.RATE_LIMIT_PERIOD }}s</code>
+                        </div>
+                    </div>
+                    
+                    <div class="list-group-item d-flex justify-content-between align-items-center">
+                        <div>
+                            <div class="fw-bold">System Version</div>
+                            <div class="text-muted small">Current software version</div>
+                        </div>
+                        <div class="text-end">
+                            <code>{{ settings.VERSION }}</code>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="alert alert-info mt-4">
+                    <i class="fas fa-info-circle me-2"></i> To modify these settings, update the environment variables in your deployment environment.
+                </div>
+            </div>
+        </div>
+        
+        <!-- Webhooks (Placeholder) -->
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-plug me-2"></i> Webhooks
+            </div>
+            <div class="card-body">
+                <div class="alert alert-secondary">
+                    <i class="fas fa-tools me-2"></i> Webhook management coming soon. You'll be able to configure, test, and manage webhook integrations here.
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Pricing Plans -->
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-tags me-2"></i> Pricing Plans
+            </div>
+            <div class="card-body p-0">
+                <div class="accordion" id="pricingPlansAccordion">
+                    {% for plan in plans %}
+                    <div class="accordion-item">
+                        <h2 class="accordion-header" id="heading{{ loop.index }}">
+                            <button class="accordion-button {% if not loop.first %}collapsed{% endif %}" type="button" data-bs-toggle="collapse" data-bs-target="#collapse{{ loop.index }}" aria-expanded="{{ 'true' if loop.first else 'false' }}" aria-controls="collapse{{ loop.index }}">
+                                {{ plan.name }}
+                                {% if plan.is_active %}
+                                <span class="badge bg-success ms-2">Active</span>
+                                {% else %}
+                                <span class="badge bg-secondary ms-2">Inactive</span>
+                                {% endif %}
+                            </button>
+                        </h2>
+                        <div id="collapse{{ loop.index }}" class="accordion-collapse collapse {% if loop.first %}show{% endif %}" aria-labelledby="heading{{ loop.index }}" data-bs-parent="#pricingPlansAccordion">
+                            <div class="accordion-body">
+                                <form action="/admin/settings/plan/{{ plan.id }}/update" method="post">
+                                    <div class="mb-3">
+                                        <label class="form-label">Plan ID</label>
+                                        <input type="text" class="form-control" value="{{ plan.id }}" readonly>
+                                    </div>
+                                    
+                                    <div class="mb-3">
+                                        <label class="form-label">Name</label>
+                                        <input type="text" name="name" class="form-control" value="{{ plan.name }}">
+                                    </div>
+                                    
+                                    <div class="mb-3">
+                                        <label class="form-label">Description</label>
+                                        <textarea name="description" class="form-control" rows="2">{{ plan.description }}</textarea>
+                                    </div>
+                                    
+                                    <div class="row">
+                                        <div class="col-md-6 mb-3">
+                                            <label class="form-label">Price ({{ plan.currency }})</label>
+                                            <input type="number" name="price" class="form-control" value="{{ plan.price }}" step="0.01">
+                                        </div>
+                                        
+                                        <div class="col-md-6 mb-3">
+                                            <label class="form-label">Billing Cycle</label>
+                                            <input type="text" class="form-control" value="{{ plan.billing_cycle }}" readonly>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="row">
+                                        <div class="col-md-6 mb-3">
+                                            <label class="form-label">Word Limit</label>
+                                            <input type="number" name="word_limit" class="form-control" value="{{ plan.word_limit }}">
+                                        </div>
+                                        
+                                        <div class="col-md-6 mb-3">
+                                            <label class="form-label">Requests Per Day</label>
+                                            <input type="number" name="requests_per_day" class="form-control" value="{{ plan.requests_per_day }}">
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="mb-3">
+                                        <label class="form-label">Features</label>
+                                        <div class="list-group">
+                                            {% for feature in plan.features %}
+                                            <div class="list-group-item">
+                                                <i class="fas fa-check-circle text-success me-2"></i> {{ feature }}
+                                            </div>
+                                            {% else %}
+                                            <div class="list-group-item">No features listed</div>
+                                            {% endfor %}
+                                        </div>
+                                        <div class="form-text">Features can be managed through the database or API.</div>
+                                    </div>
+                                    
+                                    <div class="mb-3 form-check">
+                                        <input type="checkbox" class="form-check-input" id="is_active{{ loop.index }}" name="is_active" {% if plan.is_active %}checked{% endif %}>
+                                        <label class="form-check-label" for="is_active{{ loop.index }}">Active Plan</label>
+                                    </div>
+                                    
+                                    <div class="d-flex justify-content-between">
+                                        <div class="text-muted small">
+                                            Created: {{ plan.created_at.strftime('%Y-%m-%d') }}<br>
+                                            Updated: {{ plan.updated_at.strftime('%Y-%m-%d') }}
+                                        </div>
+                                        <button type="submit" class="btn btn-primary">
+                                            <i class="fas fa-save me-2"></i> Update Plan
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="card-footer">
+                <div class="alert alert-warning mb-0">
+                    <i class="fas fa-exclamation-triangle me-2"></i> Changes to pricing plans will affect all users on those plans. Please update with caution.
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- System Maintenance -->
+<div class="row mt-4">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-tools me-2"></i> System Maintenance
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h5><i class="fas fa-database me-2"></i> Database</h5>
+                                <p class="text-muted">Manage database connections and perform maintenance tasks.</p>
+                                <div class="d-grid gap-2">
+                                    <a href="/docs" class="btn btn-outline-primary" target="_blank">View Schema</a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="col-md-4">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h5><i class="fas fa-file-export me-2"></i> Logs &amp; Exports</h5>
+                                <p class="text-muted">Download system logs and export data for analysis.</p>
+                                <div class="d-grid gap-2">
+                                    <a href="#" class="btn btn-outline-primary disabled">Export Logs</a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="col-md-4">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h5><i class="fas fa-sync me-2"></i> Caching</h5>
+                                <p class="text-muted">Manage system caches and temporary storage.</p>
+                                <div class="d-grid gap-2">
+                                    <a href="#" class="btn btn-outline-primary disabled">Clear Cache</a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="card-footer text-center">
+                <div class="alert alert-info mb-0">
+                    <i class="fas fa-info-circle me-2"></i> Additional maintenance features will be available in future updates.
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
