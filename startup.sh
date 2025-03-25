@@ -87,6 +87,8 @@ import sys
 import time
 import socket
 import urllib.parse
+import sqlalchemy
+from sqlalchemy import create_engine, text
 
 # Get database URL from environment variable
 db_url = os.getenv('DATABASE_URL', '')
@@ -134,16 +136,11 @@ try:
     
     # Try a public DATABASE_URL if available and different from the current one
     try:
-        # Connect to the database
-        conn = psycopg2.connect(
-            dbname=dbname,
-            user=user,
-            password=password,
-            host=host,
-            port=port,
-            connect_timeout=5
-        )
-        conn.close()
+        # Create SQLAlchemy engine and test connection
+        engine = create_engine(db_url, connect_args={'connect_timeout': 5})
+        with engine.connect() as conn:
+            # Use text() for SQL execution
+            conn.execute(text('SELECT 1'))
         print('Database connection successful')
         sys.exit(0)
     except Exception as e1:
@@ -155,23 +152,11 @@ try:
                 if public_url.startswith('postgres://'):
                     public_url = public_url.replace('postgres://', 'postgresql://', 1)
                 
-                parsed = urllib.parse.urlparse(public_url)
-                host = parsed.hostname
-                port = parsed.port or 5432
-                user = parsed.username
-                password = parsed.password
-                dbname = parsed.path[1:]
-                
-                # Connect using the public URL
-                conn = psycopg2.connect(
-                    dbname=dbname,
-                    user=user,
-                    password=password,
-                    host=host,
-                    port=port,
-                    connect_timeout=5
-                )
-                conn.close()
+                # Create engine and test with the public URL
+                engine = create_engine(public_url, connect_args={'connect_timeout': 5})
+                with engine.connect() as conn:
+                    # Use text() for SQL execution
+                    conn.execute(text('SELECT 1'))
                 print('Database connection successful using DATABASE_PUBLIC_URL')
                 # Set this as the primary URL for future use
                 os.environ['DATABASE_URL'] = public_url
