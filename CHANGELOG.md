@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.0.3] - 2025-03-25
+
+### Fixed
+- Fixed missing DATABASE_URL environment variable issues
+- Added SQLite fallback for database when no PostgreSQL is available
+- Enhanced startup script to handle missing environment variables
+- Added auto-detection of Railway's PostgreSQL environment variables
+- Improved robustness of the application when key services are unavailable
+- Added detailed Railway deployment instructions in README
+
 ## [1.0.2] - 2025-03-25
 
 ### Fixed
