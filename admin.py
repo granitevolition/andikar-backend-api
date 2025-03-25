@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, text
 from datetime import datetime, timedelta
@@ -13,26 +12,14 @@ from typing import Dict, List, Optional, Any, Union
 from database import get_db
 import models
 import schemas
-from main import get_current_active_user, settings
+from config import settings
+from auth import get_admin_user
 
 # Create router
 admin_router = APIRouter(prefix="/admin")
 
 # Set up templates
 templates = Jinja2Templates(directory="templates")
-
-# Admin authentication
-async def get_admin_user(current_user: models.User = Depends(get_current_active_user)):
-    """Verify that the current user has admin privileges"""
-    if not current_user:
-        raise HTTPException(status_code=401, detail="Authentication required")
-    
-    # In a real application, you would check if the user has admin role
-    # For simplicity, we just check if the username is "admin"
-    if current_user.username != "admin" and "admin" not in current_user.username:
-        raise HTTPException(status_code=403, detail="Admin privileges required")
-    
-    return current_user
 
 # Dashboard route
 @admin_router.get("/", response_class=HTMLResponse)
