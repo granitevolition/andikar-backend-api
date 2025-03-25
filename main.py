@@ -202,9 +202,12 @@ async def startup_db_client():
         logger.info("Database initialized successfully")
         
         # Import and include admin routes after app creation to avoid circular imports
-        from admin import admin_router
-        app.include_router(admin_router)
-        logger.info("Admin routes registered")
+        try:
+            from admin import admin_router
+            app.include_router(admin_router)
+            logger.info("Admin routes registered")
+        except ImportError as e:
+            logger.warning(f"Could not import admin routes: {str(e)}")
     except Exception as e:
         logger.error(f"Error initializing database: {str(e)}")
         logger.error(traceback.format_exc())
@@ -643,6 +646,34 @@ async def simulate_payment(
     db.refresh(transaction)
     
     return transaction
+
+# Initialize database
+@app.post("/api/init-db")
+async def init_db():
+    """
+    Initialize the database (admin-only endpoint for manual initialization)
+    """
+    try:
+        # Run database initialization
+        import subprocess
+        import sys
+        
+        result = subprocess.run([sys.executable, "init_db.py"], 
+                              capture_output=True, 
+                              text=True)
+        
+        return {
+            "success": True,
+            "message": "Database initialized successfully",
+            "details": result.stdout
+        }
+    except Exception as e:
+        logger.error(f"Database initialization failed: {str(e)}")
+        return {
+            "success": False,
+            "message": "Database initialization failed",
+            "error": str(e)
+        }
 
 # Health Check Endpoint
 @app.get("/health")
