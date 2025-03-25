@@ -7,12 +7,14 @@ import os
 import json
 import logging
 import time
+import sys
 from datetime import datetime, timedelta
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, func, text
+import traceback
 
 # Import database and models
 from database import get_db, engine
@@ -24,7 +26,7 @@ from utils import detect_ai_content
 # Configuration
 class Settings:
     PROJECT_NAME = "Andikar Backend API"
-    PROJECT_VERSION = "1.0.0"
+    PROJECT_VERSION = "1.0.5"
     
     # JWT Settings
     SECRET_KEY = os.getenv("SECRET_KEY", "mysecretkey")
@@ -73,7 +75,26 @@ app.add_middleware(
 
 # Security
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
+
+# Global error handler
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    if isinstance(exc, HTTPException):
+        # If it's a known FastAPI HTTP exception, let FastAPI handle it
+        raise exc
+    
+    # For unexpected errors, log them and return a generic error
+    logger.error(f"Unexpected error: {str(exc)}")
+    logger.error(traceback.format_exc())
+    
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "Internal server error",
+            "message": str(exc) if os.getenv("DEBUG") == "1" else "An unexpected error occurred"
+        }
+    )
 
 # Authentication Functions
 def verify_password(plain_password, hashed_password):
@@ -104,6 +125,9 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     return encoded_jwt
 
 async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    if not token:
+        return None
+        
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -113,61 +137,74 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         username: str = payload.get("sub")
         if username is None:
-            raise credentials_exception
+            return None
         token_data = schemas.TokenData(username=username)
     except JWTError:
-        raise credentials_exception
+        return None
     user = get_user(db, username=token_data.username)
     if user is None:
-        raise credentials_exception
+        return None
     return user
 
 async def get_current_active_user(current_user: models.User = Depends(get_current_user)):
+    if not current_user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
     if not current_user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
 
 # Rate Limiting Middleware
 @app.middleware("http")
-async def rate_limit_middleware(request: Request, call_next, db: Session = Depends(get_db)):
-    if request.url.path in ["/docs", "/redoc", "/openapi.json"]:
+async def rate_limit_middleware(request: Request, call_next):
+    if request.url.path in ["/docs", "/redoc", "/openapi.json", "/", "/health"]:
         return await call_next(request)
+    
+    try:
+        # Get the database session
+        db = next(get_db())
         
-    client_ip = request.client.host
-    api_key = request.headers.get("X-API-Key")
-    
-    # Use API key or IP for rate limiting
-    rate_limit_key = api_key if api_key else client_ip
-    
-    # Check rate limit in database
-    now = time.time()
-    rate_limit = db.query(models.RateLimit).filter(models.RateLimit.key == rate_limit_key).first()
-    
-    if rate_limit:
-        # Clean up old requests
-        requests = [req for req in rate_limit.requests if now - req < settings.RATE_LIMIT_PERIOD]
+        client_ip = request.client.host
+        api_key = request.headers.get("X-API-Key")
         
-        # Check if rate limit exceeded
-        if len(requests) >= settings.RATE_LIMIT_REQUESTS:
-            return JSONResponse(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                content={"detail": "Rate limit exceeded"}
+        # Use API key or IP for rate limiting
+        rate_limit_key = api_key if api_key else client_ip
+        
+        # Check rate limit in database
+        now = time.time()
+        rate_limit = db.query(models.RateLimit).filter(models.RateLimit.key == rate_limit_key).first()
+        
+        if rate_limit:
+            # Clean up old requests
+            requests = [req for req in rate_limit.requests if now - req < settings.RATE_LIMIT_PERIOD]
+            
+            # Check if rate limit exceeded
+            if len(requests) >= settings.RATE_LIMIT_REQUESTS:
+                return JSONResponse(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    content={"detail": "Rate limit exceeded"}
+                )
+            
+            # Add current request
+            requests.append(now)
+            rate_limit.requests = requests
+            rate_limit.last_updated = now
+            db.commit()
+        else:
+            # First request for this key
+            new_rate_limit = models.RateLimit(
+                key=rate_limit_key,
+                requests=[now],
+                last_updated=now
             )
-        
-        # Add current request
-        requests.append(now)
-        rate_limit.requests = requests
-        rate_limit.last_updated = now
-        db.commit()
-    else:
-        # First request for this key
-        new_rate_limit = models.RateLimit(
-            key=rate_limit_key,
-            requests=[now],
-            last_updated=now
-        )
-        db.add(new_rate_limit)
-        db.commit()
+            db.add(new_rate_limit)
+            db.commit()
+    except Exception as e:
+        # If rate limiting fails, just log and continue
+        logger.error(f"Rate limiting failed: {str(e)}")
     
     response = await call_next(request)
     return response
@@ -175,43 +212,51 @@ async def rate_limit_middleware(request: Request, call_next, db: Session = Depen
 # Database initialization
 @app.on_event("startup")
 async def startup_db_client():
-    # Create all tables if they don't exist
-    Base.metadata.create_all(bind=engine)
-    
-    # Initialize default pricing plans if they don't exist
-    db = next(get_db())
-    if db.query(models.PricingPlan).count() == 0:
-        default_plans = [
-            models.PricingPlan(
-                id="free",
-                name="Free Plan",
-                description="Basic features for trying out the service",
-                price=0,
-                word_limit=1000,
-                requests_per_day=10,
-                features=["Humanize text (limited)", "AI detection (limited)"]
-            ),
-            models.PricingPlan(
-                id="basic",
-                name="Basic Plan",
-                description="Standard features for regular users",
-                price=999.00,
-                word_limit=10000,
-                requests_per_day=50,
-                features=["Humanize text", "AI detection", "Email support"]
-            ),
-            models.PricingPlan(
-                id="premium",
-                name="Premium Plan",
-                description="Advanced features for professional users",
-                price=2999.00,
-                word_limit=50000,
-                requests_per_day=100,
-                features=["Humanize text", "AI detection", "Priority support", "API access"]
-            )
-        ]
-        db.add_all(default_plans)
-        db.commit()
+    try:
+        # Create all tables if they don't exist
+        Base.metadata.create_all(bind=engine)
+        
+        # Initialize default pricing plans if they don't exist
+        db = next(get_db())
+        if db.query(models.PricingPlan).count() == 0:
+            default_plans = [
+                models.PricingPlan(
+                    id="free",
+                    name="Free Plan",
+                    description="Basic features for trying out the service",
+                    price=0,
+                    word_limit=1000,
+                    requests_per_day=10,
+                    features=["Humanize text (limited)", "AI detection (limited)"]
+                ),
+                models.PricingPlan(
+                    id="basic",
+                    name="Basic Plan",
+                    description="Standard features for regular users",
+                    price=999.00,
+                    word_limit=10000,
+                    requests_per_day=50,
+                    features=["Humanize text", "AI detection", "Email support"]
+                ),
+                models.PricingPlan(
+                    id="premium",
+                    name="Premium Plan",
+                    description="Advanced features for professional users",
+                    price=2999.00,
+                    word_limit=50000,
+                    requests_per_day=100,
+                    features=["Humanize text", "AI detection", "Priority support", "API access"]
+                )
+            ]
+            db.add_all(default_plans)
+            db.commit()
+        
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Error initializing database: {str(e)}")
+        logger.error(traceback.format_exc())
+        # Don't crash the app if there's an issue during initialization
+        # It will be caught and reported when API endpoints are accessed
 
 # Authentication Endpoints
 @app.post("/token", response_model=schemas.Token)
@@ -541,7 +586,7 @@ async def initiate_mpesa_payment(
             currency="KES",
             payment_method="mpesa",
             status="pending",
-            metadata={
+            transaction_metadata={
                 "checkout_request_id": checkout_request_id,
                 "phone_number": payment_request.phone_number,
                 "account_reference": payment_request.account_reference,
@@ -579,7 +624,7 @@ async def mpesa_callback(
     
     # Find the corresponding transaction
     transaction = db.query(models.Transaction).filter(
-        models.Transaction.metadata.contains({"checkout_request_id": callback.checkout_request_id})
+        models.Transaction.transaction_metadata.contains({"checkout_request_id": callback.checkout_request_id})
     ).first()
     
     if not transaction:
@@ -601,7 +646,7 @@ async def mpesa_callback(
         transaction.status = "failed"
     
     # Update transaction metadata
-    transaction.metadata.update({
+    transaction.transaction_metadata.update({
         "mpesa_receipt_number": callback.mpesa_receipt_number,
         "transaction_date": callback.transaction_date,
         "result_desc": callback.result_desc
@@ -625,7 +670,7 @@ async def simulate_payment(
         currency="KES",
         payment_method="simulation",
         status="completed",
-        metadata={"simulation": True}
+        transaction_metadata={"simulation": True}
     )
     
     db.add(transaction)
@@ -688,11 +733,39 @@ async def health_check(db: Session = Depends(get_db)):
 # Root endpoint
 @app.get("/")
 async def root():
+    env_info = {}
+    
+    # List of environment variables to include (without sensitive values)
+    env_vars_to_show = [
+        "RAILWAY_PROJECT_NAME", 
+        "RAILWAY_SERVICE_NAME", 
+        "RAILWAY_ENVIRONMENT_NAME",
+        "RAILWAY_PUBLIC_DOMAIN",
+        "HUMANIZER_API_URL"
+    ]
+    
+    for var in env_vars_to_show:
+        env_info[var] = os.getenv(var, "Not set")
+    
+    # Add database type info
+    db_url = os.getenv("DATABASE_URL", "")
+    if db_url:
+        db_type = db_url.split(":")[0]
+        db_info = f"{db_type} database"
+        if "@" in db_url:
+            host = db_url.split("@")[1].split("/")[0]
+            db_info += f" at {host}"
+        env_info["DATABASE_TYPE"] = db_info
+    
     return {
         "name": settings.PROJECT_NAME,
         "version": settings.PROJECT_VERSION,
         "description": "Backend API Gateway for Andikar AI services",
-        "documentation": "/docs"
+        "status": "up and running",
+        "environment": env_info,
+        "timestamp": datetime.utcnow().isoformat(),
+        "documentation": "/docs",
+        "health_check": "/health"
     }
 
 # Main entry point
