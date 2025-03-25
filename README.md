@@ -1,258 +1,100 @@
-# Andikar Backend API Gateway
+# Andikar Backend API
 
-A comprehensive backend API gateway that integrates the Andikar frontend with various external services including text humanization, AI detection, and M-Pesa payments.
+Backend API Gateway for Andikar AI services. This API provides a centralized gateway for text humanization, AI detection, and other services.
 
-## Features
+## Recent Updates
 
-- **API Gateway**: Central interface for all external services
-- **Authentication**: JWT-based authentication and authorization
-- **User Management**: Registration, profiles, and subscription management
-- **Service Integration**:
-  - Text Humanizer API
-  - AI Detection API (configurable)
-  - M-Pesa Payment Processing
-- **PostgreSQL Database**: Persistent storage for users, transactions, and logs
-- **Rate Limiting**: Prevent API abuse
-- **Logging & Monitoring**: Comprehensive logging for debugging and analytics
-- **Health Checks**: Monitor system and service health
-- **Docker Support**: Easy deployment with Docker and Docker Compose
+- **Pydantic v2 Migration**: Migrated from Pydantic v1 to v2, implementing the new BaseSettings from pydantic-settings
+- **Added Dockerfile**: For containerized deployment
+- **Added Startup Script**: Easier deployment with automatic database connection and initialization
 
-## Technologies
+## Environment Variables
 
-- **FastAPI**: High-performance web framework
-- **PostgreSQL**: Reliable relational database
-- **SQLAlchemy**: SQL toolkit and ORM
-- **Alembic**: Database migration tool
-- **Pydantic**: Data validation and settings management
-- **JWT**: Secure authentication
-- **HTTPX**: Asynchronous HTTP client
-- **Docker**: Containerization for consistent deployment
-- **Nginx**: Reverse proxy and load balancing (optional)
+| Variable | Description | Default |
+|----------|-------------|---------|
+| PORT | Port to run the API on | 8080 |
+| DATABASE_URL | Database connection string | sqlite:///./andikar.db |
+| DATABASE_PUBLIC_URL | Public database URL (overrides DATABASE_URL if set) | None |
+| SECRET_KEY | JWT secret key | "mysecretkey" |
+| HUMANIZER_API_URL | URL to the text humanizer service | https://web-production-3db6c.up.railway.app |
+| AI_DETECTOR_API_URL | URL to the AI detection service | https://ai-detector-api.example.com |
+| DEBUG | Enable debug mode | 0 |
 
-## Prerequisites
+## Running Locally
 
-- Python 3.9+
-- Docker and Docker Compose (recommended)
-- PostgreSQL 13+ (handled by Docker or Railway)
+### Prerequisites
 
-## Quick Start
+- Python 3.11+
+- PostgreSQL (recommended) or SQLite
 
-### Using Docker (Recommended)
+### Installation
 
-1. Clone the repository and navigate to the project directory:
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/granitevolition/andikar-backend-api.git
+   cd andikar-backend-api
+   ```
 
-```bash
-git clone https://github.com/granitevolition/andikar-backend-api.git
-cd andikar-backend-api
-```
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-2. Copy the example environment file and configure it:
+3. Set environment variables:
+   ```bash
+   cp .env.example .env
+   # Edit .env with your settings
+   ```
 
-```bash
-cp .env.example .env
-# Edit .env file with your settings
-```
+4. Run the application:
+   ```bash
+   ./start.sh
+   ```
 
-3. Start the services using Docker Compose:
+## Running with Docker
 
-```bash
-docker-compose up --build
-```
+1. Build the Docker image:
+   ```bash
+   docker build -t andikar-backend-api .
+   ```
 
-4. The API will be available at http://localhost:8000
+2. Run the container:
+   ```bash
+   docker run -p 8080:8080 \
+     -e DATABASE_URL=postgresql://user:password@host:port/dbname \
+     -e SECRET_KEY=your_secret_key \
+     andikar-backend-api
+   ```
 
-### Manual Installation
+## API Endpoints
 
-1. Clone the repository and navigate to the project directory:
+- **Authentication**:
+  - POST `/token`: Obtain JWT token
+  - POST `/users/register`: Register a new user
 
-```bash
-git clone https://github.com/granitevolition/andikar-backend-api.git
-cd andikar-backend-api
-```
+- **User Management**:
+  - GET `/users/me`: Get current user details
+  - PUT `/users/me`: Update user details
 
-2. Create and activate a virtual environment:
+- **Text Services**:
+  - POST `/api/humanize`: Humanize text
+  - POST `/api/detect`: Detect AI-generated content
 
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows, use: venv\\Scripts\\activate
-```
+- **Payment Integration**:
+  - POST `/api/payments/mpesa/initiate`: Initiate M-Pesa payment
+  - POST `/api/payments/mpesa/callback`: M-Pesa callback
+  - POST `/api/payments/simulate`: Simulate payment (testing only)
 
-3. Install dependencies:
+- **System**:
+  - GET `/`: API information
+  - GET `/health`: API health check
 
-```bash
-pip install -r requirements.txt
-```
+## Deployment on Railway
 
-4. Copy the example environment file and configure it:
+This API is configured for easy deployment on Railway.app:
 
-```bash
-cp .env.example .env
-# Edit .env file with your settings
-```
+1. Connect your repository to Railway
+2. Add the required environment variables
+3. Deploy
 
-5. Run database migrations:
-
-```bash
-alembic upgrade head
-```
-
-6. Start the application:
-
-```bash
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-7. The API will be available at http://localhost:8000
-
-## Configuration
-
-The application is configured using environment variables, which can be set in the `.env` file:
-
-### General Settings
-- `PORT`: Port to run the application on (default: 8000)
-- `SECRET_KEY`: Secret key for JWT token generation
-- `LOG_LEVEL`: Logging level (DEBUG, INFO, WARNING, ERROR)
-
-### Database Settings
-- `DATABASE_URL`: PostgreSQL connection URL (example: postgresql://user:password@localhost:5432/andikar)
-  - If not set, the app will look for individual PostgreSQL variables:
-  - `PGHOST`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`, `PGPORT`
-  - If none of these are available, the app will fall back to SQLite
-
-### API Endpoints
-- `HUMANIZER_API_URL`: URL of the text humanizer API
-- `AI_DETECTOR_API_URL`: URL of the AI detection API
-
-### M-Pesa Integration
-- `MPESA_CONSUMER_KEY`: M-Pesa API consumer key
-- `MPESA_CONSUMER_SECRET`: M-Pesa API consumer secret
-- `MPESA_PASSKEY`: M-Pesa API passkey
-- `MPESA_SHORTCODE`: M-Pesa shortcode
-- `MPESA_CALLBACK_URL`: URL for M-Pesa callbacks
-
-### Rate Limiting
-- `RATE_LIMIT_REQUESTS`: Maximum requests per period
-- `RATE_LIMIT_PERIOD`: Period for rate limiting in seconds
-
-## Database Migrations
-
-This project uses Alembic for database migrations. When you make changes to the database models, you need to create a new migration:
-
-```bash
-alembic revision --autogenerate -m "Description of the change"
-```
-
-To apply the migrations:
-
-```bash
-alembic upgrade head
-```
-
-## API Documentation
-
-The API documentation is available at http://localhost:8000/docs when the application is running. This provides a detailed interactive documentation of all available endpoints.
-
-## Key API Endpoints
-
-### Authentication
-- `POST /token`: Authenticate user and get JWT token
-
-### User Management
-- `POST /users/register`: Register a new user
-- `GET /users/me`: Get current user profile
-- `PUT /users/me`: Update user profile
-
-### Text Services
-- `POST /api/humanize`: Humanize text
-- `POST /api/detect`: Detect AI content
-
-### Payments
-- `POST /api/payments/mpesa/initiate`: Initiate M-Pesa payment
-- `POST /api/payments/mpesa/callback`: Receive M-Pesa payment notification
-- `POST /api/payments/simulate`: Simulate payment (for testing)
-
-### System
-- `GET /health`: Check system health
-- `GET /`: API information
-
-## Deployment
-
-### Railway Deployment
-
-This application is configured for easy deployment on Railway.app:
-
-1. **Create a new project on Railway**:
-   - Go to [Railway Dashboard](https://railway.app/dashboard)
-   - Click "New Project"
-   - Choose "Deploy from GitHub repo"
-   - Select the "andikar-backend-api" repository
-
-2. **Add PostgreSQL service**:
-   - In your project, click "New Service"
-   - Choose "Database" → "PostgreSQL"
-   - This will automatically create a PostgreSQL database
-
-3. **Connect the services**:
-   - In your application settings (not the database):
-   - Go to "Variables" tab
-   - Click "Add Variables" → "From database"
-   - Select your PostgreSQL database
-   - This will add all the necessary PostgreSQL variables
-
-4. **Add additional environment variables**:
-   - `SECRET_KEY`: Generate a secure random string
-   - `HUMANIZER_API_URL`: Your humanizer API endpoint (e.g., https://web-production-3db6c.up.railway.app/humanize_text)
-   - Other variables as needed
-
-5. **Deploy the application**:
-   - Railway will automatically deploy your application
-   - If needed, you can manually trigger a deployment from the "Deployments" tab
-
-6. **Verify the deployment**:
-   - Check the logs to make sure the application started correctly
-   - Visit your application URL to see if it's responding
-
-### Common Deployment Issues
-
-1. **Database Connection Issues**:
-   - Make sure the DATABASE_URL or PostgreSQL variables are set
-   - Check that the database service is running and accessible
-   - The application now has fallback mechanisms to handle missing database variables
-
-2. **Environment Variables**:
-   - Ensure all required environment variables are set
-   - Check for typos in variable names
-   - Use the "Variables" section in Railway to manage environment variables
-
-3. **Deployment Failures**:
-   - Check the deployment logs for detailed error messages
-   - The application is designed to provide meaningful error messages and fallbacks
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Database Migration Errors**: If you encounter errors during database migrations, ensure that:
-   - Your PostgreSQL database is running and accessible
-   - The database specified in `DATABASE_URL` exists
-   - You have the correct permissions to create/modify tables
-   - Models don't use reserved column names (like 'metadata')
-
-2. **PORT Environment Variable Issues**: If you see errors related to the PORT variable:
-   - Make sure the startup.sh script has executable permissions (`chmod +x startup.sh`)
-   - Use `PORT=${PORT:-8000}` syntax to provide a default value
-   - Avoid using string interpolation with environment variables in the Procfile
-
-3. **API Connection Issues**: If services aren't connecting properly:
-   - Check all API URLs in your environment variables
-   - Verify network connectivity between your application and the external services
-   - Check for any rate limiting or authentication issues with external APIs
-
-4. **Railway PostgreSQL Variables**: If you're using Railway's PostgreSQL:
-   - The application automatically looks for `PGHOST`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` variables
-   - Make sure you've linked your database with your app in Railway dashboard
-   - When linking, Railway automatically sets these environment variables
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
+Railway will automatically use the provided Dockerfile and startup script.
