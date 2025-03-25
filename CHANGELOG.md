@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.0.2] - 2025-03-25
+
+### Fixed
+- Fixed database connection issues in the Alembic migrations
+- Added retry logic and better error handling for database connections
+- Added database health check in startup script to wait for database to be ready
+- Improved logging for database connection attempts
+- Enhanced PostgreSQL connection parameters for better reliability
+
 ## [1.0.1] - 2025-03-25
 
 ### Fixed
