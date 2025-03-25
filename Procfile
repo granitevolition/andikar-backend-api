@@ -1,1 +1,1 @@
-web: python -c "import os; print(f'PORT={os.environ.get(\"PORT\", 8000)}')" > .env.port && uvicorn main:app --host 0.0.0.0 --port $(cat .env.port | cut -d= -f2)
+web: ./startup.sh
