@@ -1,0 +1,272 @@
+{% extends "admin/base.html" %}
+
+{% block title %}User Details - Andikar Admin{% endblock %}
+
+{% block header %}User Details{% endblock %}
+
+{% block content %}
+<div class="row">
+    <!-- User Info Card -->
+    <div class="col-lg-4">
+        <div class="card mb-4">
+            <div class="card-header">
+                <i class="fas fa-user me-2"></i> User Information
+            </div>
+            <div class="card-body">
+                <div class="mb-4 text-center">
+                    <div class="avatar bg-primary text-white rounded-circle d-inline-flex justify-content-center align-items-center mb-3" style="width: 80px; height: 80px; font-size: 32px;">
+                        {{ target_user.username[0]|upper }}
+                    </div>
+                    <h5 class="mb-0">{{ target_user.username }}</h5>
+                    <div class="text-muted">{{ target_user.email }}</div>
+                </div>
+                
+                <form action="/admin/users/{{ target_user.id }}/update" method="post">
+                    <div class="mb-3">
+                        <label class="form-label">Full Name</label>
+                        <input type="text" name="full_name" class="form-control" value="{{ target_user.full_name or '' }}">
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Plan</label>
+                        <select name="plan_id" class="form-select">
+                            {% for plan in plans %}
+                            <option value="{{ plan.id }}" {% if plan.id == target_user.plan_id %}selected{% endif %}>
+                                {{ plan.name }} ({{ plan.price }} {{ plan.currency }})
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Payment Status</label>
+                        <select name="payment_status" class="form-select">
+                            <option value="Pending" {% if target_user.payment_status == 'Pending' %}selected{% endif %}>Pending</option>
+                            <option value="Paid" {% if target_user.payment_status == 'Paid' %}selected{% endif %}>Paid</option>
+                            <option value="Failed" {% if target_user.payment_status == 'Failed' %}selected{% endif %}>Failed</option>
+                            <option value="Cancelled" {% if target_user.payment_status == 'Cancelled' %}selected{% endif %}>Cancelled</option>
+                        </select>
+                    </div>
+                    
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="is_active" name="is_active" {% if target_user.is_active %}checked{% endif %}>
+                        <label class="form-check-label" for="is_active">Active Account</label>
+                    </div>
+                    
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save me-2"></i> Update User
+                        </button>
+                    </div>
+                </form>
+            </div>
+            <div class="card-footer">
+                <div class="d-flex justify-content-between text-muted small">
+                    <div>ID: {{ target_user.id[:8] }}...</div>
+                    <div>Joined: {{ target_user.joined_date.strftime('%Y-%m-%d') }}</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- User Stats Card -->
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-chart-pie me-2"></i> Usage Statistics
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label">Words Used</label>
+                    <div class="progress" style="height: 25px;">
+                        {% set word_limit = plans|selectattr('id', 'equalto', target_user.plan_id)|map(attribute='word_limit')|first %}
+                        {% set word_percent = (target_user.words_used / word_limit * 100) if word_limit > 0 else 0 %}
+                        {% set progress_class = 'bg-success' if word_percent < 50 else ('bg-warning' if word_percent < 85 else 'bg-danger') %}
+                        <div class="progress-bar {{ progress_class }}" role="progressbar" style="width: {{ min(word_percent, 100) }}%;" 
+                             aria-valuenow="{{ target_user.words_used }}" aria-valuemin="0" aria-valuemax="{{ word_limit }}">
+                            {{ target_user.words_used }} / {{ word_limit }} ({{ word_percent|round(1) }}%)
+                        </div>
+                    </div>
+                </div>
+                
+                <table class="table table-sm">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Humanize</th>
+                            <th>Detect</th>
+                            <th>Words</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for stat in usage_stats %}
+                        <tr>
+                            <td>{{ stat.year }}-{{ '%02d'|format(stat.month) }}-{{ '%02d'|format(stat.day) }}</td>
+                            <td>{{ stat.humanize_requests }}</td>
+                            <td>{{ stat.detect_requests }}</td>
+                            <td>{{ stat.words_processed }}</td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="4" class="text-center">No usage data found</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Transactions Card -->
+    <div class="col-lg-8">
+        <div class="card mb-4">
+            <div class="card-header">
+                <i class="fas fa-money-bill-wave me-2"></i> Transactions
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Date</th>
+                                <th>Amount</th>
+                                <th>Method</th>
+                                <th>Status</th>
+                                <th>Details</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for transaction in transactions %}
+                            <tr>
+                                <td>{{ transaction.id[:8] }}...</td>
+                                <td>{{ transaction.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                                <td>{{ transaction.amount }} {{ transaction.currency }}</td>
+                                <td>{{ transaction.payment_method }}</td>
+                                <td>
+                                    {% if transaction.status == 'completed' %}
+                                    <span class="badge bg-success-light">Completed</span>
+                                    {% elif transaction.status == 'pending' %}
+                                    <span class="badge bg-warning-light">Pending</span>
+                                    {% else %}
+                                    <span class="badge bg-danger-light">{{ transaction.status }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <button type="button" class="btn btn-sm btn-info" data-bs-toggle="modal" data-bs-target="#transactionModal{{ loop.index }}">
+                                        <i class="fas fa-info-circle"></i>
+                                    </button>
+                                    
+                                    <!-- Transaction Modal -->
+                                    <div class="modal fade" id="transactionModal{{ loop.index }}" tabindex="-1" aria-hidden="true">
+                                        <div class="modal-dialog">
+                                            <div class="modal-content">
+                                                <div class="modal-header">
+                                                    <h5 class="modal-title">Transaction Details</h5>
+                                                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                                </div>
+                                                <div class="modal-body">
+                                                    <div class="mb-3">
+                                                        <label class="form-label">Transaction ID</label>
+                                                        <input type="text" class="form-control" value="{{ transaction.id }}" readonly>
+                                                    </div>
+                                                    
+                                                    <div class="mb-3">
+                                                        <label class="form-label">Metadata</label>
+                                                        <textarea class="form-control" rows="5" readonly>{{ transaction.transaction_metadata|tojson(indent=2) }}</textarea>
+                                                    </div>
+                                                    
+                                                    <div class="mb-3">
+                                                        <label class="form-label">Created At</label>
+                                                        <input type="text" class="form-control" value="{{ transaction.created_at }}" readonly>
+                                                    </div>
+                                                    
+                                                    <div class="mb-3">
+                                                        <label class="form-label">Updated At</label>
+                                                        <input type="text" class="form-control" value="{{ transaction.updated_at }}" readonly>
+                                                    </div>
+                                                </div>
+                                                <div class="modal-footer">
+                                                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="6" class="text-center">No transactions found</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+        
+        <!-- API Logs Card -->
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-file-alt me-2"></i> API Logs
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Endpoint</th>
+                                <th>Request Size</th>
+                                <th>Response Size</th>
+                                <th>Time (s)</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for log in api_logs %}
+                            <tr>
+                                <td>{{ log.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                                <td>{{ log.endpoint }}</td>
+                                <td>{{ log.request_size }}</td>
+                                <td>{{ log.response_size or '-' }}</td>
+                                <td>{{ "%.3f"|format(log.processing_time) if log.processing_time else '-' }}</td>
+                                <td>
+                                    {% if log.status_code == 200 %}
+                                    <span class="badge bg-success">{{ log.status_code }}</span>
+                                    {% elif log.status_code >= 400 and log.status_code < 500 %}
+                                    <span class="badge bg-warning">{{ log.status_code }}</span>
+                                    {% elif log.status_code >= 500 %}
+                                    <span class="badge bg-danger">{{ log.status_code }}</span>
+                                    {% else %}
+                                    <span class="badge bg-secondary">{{ log.status_code or '-' }}</span>
+                                    {% endif %}
+                                    
+                                    {% if log.error %}
+                                    <button type="button" class="btn btn-sm btn-outline-danger ms-1" data-bs-toggle="tooltip" title="{{ log.error }}">
+                                        <i class="fas fa-exclamation-circle"></i>
+                                    </button>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="6" class="text-center">No API logs found</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Initialize tooltips
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
+    var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl)
+    })
+</script>
+{% endblock %}
