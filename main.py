@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from fastapi.security import OAuth2PasswordRequestForm
 from typing import Dict, List, Optional, Any, Union
 import httpx
 import os
@@ -282,7 +283,7 @@ async def update_user(
     db: Session = Depends(get_db)
 ):
     # Update user fields
-    user_data = user_update.dict(exclude_unset=True)
+    user_data = user_update.model_dump(exclude_unset=True)  # model_dump instead of dict in Pydantic v2
     
     if user_data:
         for key, value in user_data.items():
