@@ -6,7 +6,7 @@ Backend API Gateway for Andikar AI services. This API provides a centralized gat
 
 - **Pydantic v2 Migration**: Migrated from Pydantic v1 to v2, implementing the new BaseSettings from pydantic-settings
 - **Added Dockerfile**: For containerized deployment
-- **Added Startup Script**: Easier deployment with automatic database connection and initialization
+- **Added Python Entrypoint**: Easier deployment with automatic database connection and initialization
 
 ## Environment Variables
 
@@ -48,7 +48,7 @@ Backend API Gateway for Andikar AI services. This API provides a centralized gat
 
 4. Run the application:
    ```bash
-   ./start.sh
+   python entrypoint.py
    ```
 
 ## Running with Docker
@@ -97,4 +97,4 @@ This API is configured for easy deployment on Railway.app:
 2. Add the required environment variables
 3. Deploy
 
-Railway will automatically use the provided Dockerfile and startup script.
+Railway will automatically use the provided Dockerfile and Python entrypoint script.
