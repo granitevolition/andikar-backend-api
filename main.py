@@ -1,6 +1,8 @@
 from fastapi import FastAPI, HTTPException, Depends, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from typing import Dict, List, Optional, Any, Union
 import httpx
 import os
@@ -22,6 +24,9 @@ import models
 import schemas
 from models import Base
 from utils import detect_ai_content
+
+# Import admin routes
+from admin import admin_router
 
 # Configuration
 class Settings:
@@ -72,6 +77,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount static files
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Security
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -160,7 +168,7 @@ async def get_current_active_user(current_user: models.User = Depends(get_curren
 # Rate Limiting Middleware
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
-    if request.url.path in ["/docs", "/redoc", "/openapi.json", "/", "/health"]:
+    if request.url.path in ["/docs", "/redoc", "/openapi.json", "/", "/health"] or request.url.path.startswith("/admin") or request.url.path.startswith("/static"):
         return await call_next(request)
     
     try:
@@ -250,6 +258,21 @@ async def startup_db_client():
             ]
             db.add_all(default_plans)
             db.commit()
+        
+        # Create an admin user if it doesn't exist
+        if not db.query(models.User).filter(models.User.username == "admin").first():
+            admin_user = models.User(
+                username="admin",
+                email="admin@andikar.com",
+                full_name="Admin User",
+                hashed_password=get_password_hash("admin123"),  # Change this password in production!
+                plan_id="premium",
+                payment_status="Paid",
+                is_active=True
+            )
+            db.add(admin_user)
+            db.commit()
+            logger.info("Created default admin user")
         
         logger.info("Database initialized successfully")
     except Exception as e:
@@ -765,8 +788,12 @@ async def root():
         "environment": env_info,
         "timestamp": datetime.utcnow().isoformat(),
         "documentation": "/docs",
-        "health_check": "/health"
+        "health_check": "/health",
+        "admin_dashboard": "/admin"
     }
+
+# Include admin routes
+app.include_router(admin_router)
 
 # Main entry point
 if __name__ == "__main__":
