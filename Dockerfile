@@ -20,5 +20,8 @@ COPY . .
 ENV PORT=8080
 EXPOSE 8080
 
-# Run using Python entrypoint instead of bash script
-CMD ["python", "entrypoint.py"]
+# Set PYTHONUNBUFFERED to ensure log output is visible
+ENV PYTHONUNBUFFERED=1
+
+# CMD is ignored by Railway when using Procfile
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "${PORT:-8080}"]
