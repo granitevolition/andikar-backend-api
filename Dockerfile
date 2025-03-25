@@ -16,12 +16,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Make startup script executable
-RUN chmod +x start.sh
+# Make startup script executable (more explicit permissions)
+RUN chmod 755 start.sh
 
 # Expose port 
 ENV PORT=8080
 EXPOSE 8080
 
-# Run the application
-CMD ["./start.sh"]
+# Run with bash to avoid permission issues
+CMD ["bash", "start.sh"]
