@@ -1,0 +1,248 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Transactions - Andikar Admin{% endblock %}
+
+{% block header %}Transactions{% endblock %}
+
+{% block content %}
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <div>
+            <i class="fas fa-filter me-2"></i> Filter Transactions
+        </div>
+        <div>
+            <span class="badge bg-primary">{{ filter.total }} transactions found</span>
+            {% if filter.status != 'all' %}
+            <a href="/admin/transactions" class="btn btn-sm btn-outline-secondary ms-2">
+                <i class="fas fa-times"></i> Clear
+            </a>
+            {% endif %}
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="btn-group w-100" role="group">
+            <a href="/admin/transactions" class="btn btn-outline-primary {% if filter.status == 'all' %}active{% endif %}">
+                All ({{ filter.all_total }})
+            </a>
+            <a href="/admin/transactions?status=completed" class="btn btn-outline-success {% if filter.status == 'completed' %}active{% endif %}">
+                Completed
+            </a>
+            <a href="/admin/transactions?status=pending" class="btn btn-outline-warning {% if filter.status == 'pending' %}active{% endif %}">
+                Pending
+            </a>
+            <a href="/admin/transactions?status=failed" class="btn btn-outline-danger {% if filter.status == 'failed' %}active{% endif %}">
+                Failed
+            </a>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <i class="fas fa-money-bill-wave me-2"></i> Transactions
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>User</th>
+                        <th>Date</th>
+                        <th>Amount</th>
+                        <th>Method</th>
+                        <th>Status</th>
+                        <th>Details</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for transaction in transactions %}
+                    <tr>
+                        <td>{{ transaction.id[:8] }}...</td>
+                        <td>
+                            {% if transaction.user_id in users %}
+                            <a href="/admin/users/{{ transaction.user_id }}">
+                                {{ users[transaction.user_id].username }}
+                            </a>
+                            {% else %}
+                            <span class="text-muted">Unknown User</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ transaction.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                        <td>{{ transaction.amount }} {{ transaction.currency }}</td>
+                        <td>{{ transaction.payment_method }}</td>
+                        <td>
+                            {% if transaction.status == 'completed' %}
+                            <span class="badge bg-success-light">Completed</span>
+                            {% elif transaction.status == 'pending' %}
+                            <span class="badge bg-warning-light">Pending</span>
+                            {% else %}
+                            <span class="badge bg-danger-light">{{ transaction.status }}</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <button type="button" class="btn btn-sm btn-info" data-bs-toggle="modal" data-bs-target="#transactionModal{{ loop.index }}">
+                                <i class="fas fa-info-circle"></i>
+                            </button>
+                            
+                            <!-- Transaction Modal -->
+                            <div class="modal fade" id="transactionModal{{ loop.index }}" tabindex="-1" aria-hidden="true">
+                                <div class="modal-dialog">
+                                    <div class="modal-content">
+                                        <div class="modal-header">
+                                            <h5 class="modal-title">Transaction Details</h5>
+                                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                                        </div>
+                                        <div class="modal-body">
+                                            <div class="mb-3">
+                                                <label class="form-label">Transaction ID</label>
+                                                <input type="text" class="form-control" value="{{ transaction.id }}" readonly>
+                                            </div>
+                                            
+                                            <div class="mb-3">
+                                                <label class="form-label">User ID</label>
+                                                <input type="text" class="form-control" value="{{ transaction.user_id }}" readonly>
+                                            </div>
+                                            
+                                            <div class="mb-3">
+                                                <label class="form-label">Metadata</label>
+                                                <textarea class="form-control" rows="5" readonly>{{ transaction.transaction_metadata|tojson(indent=2) }}</textarea>
+                                            </div>
+                                            
+                                            <div class="row">
+                                                <div class="col-md-6 mb-3">
+                                                    <label class="form-label">Created At</label>
+                                                    <input type="text" class="form-control" value="{{ transaction.created_at }}" readonly>
+                                                </div>
+                                                
+                                                <div class="col-md-6 mb-3">
+                                                    <label class="form-label">Updated At</label>
+                                                    <input type="text" class="form-control" value="{{ transaction.updated_at }}" readonly>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="modal-footer">
+                                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7" class="text-center">No transactions found</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    
+    {% if pagination.total_pages > 1 %}
+    <div class="card-footer">
+        <nav aria-label="Page navigation">
+            <ul class="pagination justify-content-center mb-0">
+                {% if pagination.has_prev %}
+                <li class="page-item">
+                    <a class="page-link" href="/admin/transactions?page={{ pagination.prev_page }}{% if filter.status != 'all' %}&status={{ filter.status }}{% endif %}" aria-label="Previous">
+                        <span aria-hidden="true">&laquo;</span>
+                    </a>
+                </li>
+                {% else %}
+                <li class="page-item disabled">
+                    <a class="page-link" href="#" aria-label="Previous">
+                        <span aria-hidden="true">&laquo;</span>
+                    </a>
+                </li>
+                {% endif %}
+                
+                {% set start_page = [1, pagination.current_page - 2]|max %}
+                {% set end_page = [pagination.total_pages, pagination.current_page + 2]|min %}
+                
+                {% if start_page > 1 %}
+                <li class="page-item">
+                    <a class="page-link" href="/admin/transactions?page=1{% if filter.status != 'all' %}&status={{ filter.status }}{% endif %}">1</a>
+                </li>
+                {% if start_page > 2 %}
+                <li class="page-item disabled">
+                    <a class="page-link" href="#">...</a>
+                </li>
+                {% endif %}
+                {% endif %}
+                
+                {% for p in range(start_page, end_page + 1) %}
+                <li class="page-item {% if p == pagination.current_page %}active{% endif %}">
+                    <a class="page-link" href="/admin/transactions?page={{ p }}{% if filter.status != 'all' %}&status={{ filter.status }}{% endif %}">{{ p }}</a>
+                </li>
+                {% endfor %}
+                
+                {% if end_page < pagination.total_pages %}
+                {% if end_page < pagination.total_pages - 1 %}
+                <li class="page-item disabled">
+                    <a class="page-link" href="#">...</a>
+                </li>
+                {% endif %}
+                <li class="page-item">
+                    <a class="page-link" href="/admin/transactions?page={{ pagination.total_pages }}{% if filter.status != 'all' %}&status={{ filter.status }}{% endif %}">{{ pagination.total_pages }}</a>
+                </li>
+                {% endif %}
+                
+                {% if pagination.has_next %}
+                <li class="page-item">
+                    <a class="page-link" href="/admin/transactions?page={{ pagination.next_page }}{% if filter.status != 'all' %}&status={{ filter.status }}{% endif %}" aria-label="Next">
+                        <span aria-hidden="true">&raquo;</span>
+                    </a>
+                </li>
+                {% else %}
+                <li class="page-item disabled">
+                    <a class="page-link" href="#" aria-label="Next">
+                        <span aria-hidden="true">&raquo;</span>
+                    </a>
+                </li>
+                {% endif %}
+            </ul>
+        </nav>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Summary Card -->
+<div class="row mt-4">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-chart-pie me-2"></i> Transaction Summary
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4">
+                        <div class="card bg-light">
+                            <div class="card-body text-center">
+                                <h6 class="text-muted mb-2">Total Volume</h6>
+                                <h3 class="mb-0">{{ stats.total_volume }} KES</h3>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card bg-light">
+                            <div class="card-body text-center">
+                                <h6 class="text-muted mb-2">Successful Transactions</h6>
+                                <h3 class="mb-0">{{ stats.completed }}</h3>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card bg-light">
+                            <div class="card-body text-center">
+                                <h6 class="text-muted mb-2">Average Amount</h6>
+                                <h3 class="mb-0">{{ stats.average }} KES</h3>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
