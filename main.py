@@ -1,20 +1,25 @@
 from fastapi import FastAPI, HTTPException, Depends, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
 from typing import Dict, List, Optional, Any, Union
 import httpx
 import os
 import json
 import logging
-import uuid
-from datetime import datetime, timedelta
 import time
+from datetime import datetime, timedelta
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-import motor.motor_asyncio
-from pymongo import ReturnDocument
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from sqlalchemy.orm import Session
+from sqlalchemy import desc, func, text
+
+# Import database and models
+from database import get_db, engine
+import models
+import schemas
+from models import Base
+from utils import detect_ai_content
 
 # Configuration
 class Settings:
@@ -25,10 +30,6 @@ class Settings:
     SECRET_KEY = os.getenv("SECRET_KEY", "mysecretkey")
     ALGORITHM = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES = 30
-    
-    # Database Settings
-    MONGODB_URL = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
-    DATABASE_NAME = os.getenv("DATABASE_NAME", "andikar")
     
     # Service API Endpoints
     HUMANIZER_API_URL = os.getenv("HUMANIZER_API_URL", "https://web-production-3db6c.up.railway.app")
@@ -70,115 +71,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Connect to MongoDB
-client = motor.motor_asyncio.AsyncIOMotorClient(settings.MONGODB_URL)
-db = client[settings.DATABASE_NAME]
-
-# Collections
-users_collection = db["users"]
-transactions_collection = db["transactions"]
-api_logs_collection = db["api_logs"]
-rate_limits_collection = db["rate_limits"]
-
 # Security
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
-
-# Pydantic models
-class Token(BaseModel):
-    access_token: str
-    token_type: str
-
-class TokenData(BaseModel):
-    username: Optional[str] = None
-
-class APIKey(BaseModel):
-    api_key: str
-    service: str
-    issued_at: datetime
-    expires_at: Optional[datetime] = None
-    is_active: bool = True
-
-class PricingPlan(BaseModel):
-    id: str
-    name: str
-    description: str
-    price: float
-    word_limit: int
-    requests_per_day: int
-    features: List[str]
-
-class UserBase(BaseModel):
-    username: str
-    email: str
-    full_name: Optional[str] = None
-    
-class UserCreate(UserBase):
-    password: str
-    plan_id: str = "free"
-
-class User(UserBase):
-    id: str
-    plan_id: str
-    words_used: int = 0
-    payment_status: str = "Pending"
-    joined_date: datetime
-    api_keys: Dict[str, str] = {}
-    is_active: bool = True
-
-    class Config:
-        orm_mode = True
-
-class UserInDB(User):
-    hashed_password: str
-
-# Text service models
-class TextRequest(BaseModel):
-    input_text: str
-    max_words: Optional[int] = None
-
-class TextResponse(BaseModel):
-    result: str
-    words_processed: int
-    processing_time: float
-
-class DetectionResult(BaseModel):
-    ai_score: float
-    human_score: float
-    analysis: Dict[str, Any]
-
-# Payment models
-class MpesaPaymentRequest(BaseModel):
-    phone_number: str
-    amount: float
-    account_reference: str
-    transaction_desc: str
-
-class MpesaPaymentResponse(BaseModel):
-    checkout_request_id: str
-    response_code: str
-    response_description: str
-    customer_message: str
-
-class MpesaCallback(BaseModel):
-    result_code: int
-    result_desc: str
-    checkout_request_id: str
-    amount: float
-    mpesa_receipt_number: Optional[str] = None
-    transaction_date: Optional[str] = None
-    phone_number: Optional[str] = None
-
-class Transaction(BaseModel):
-    id: str
-    user_id: str
-    amount: float
-    currency: str = "KES"
-    payment_method: str
-    status: str
-    created_at: datetime
-    updated_at: datetime
-    metadata: Dict[str, Any] = {}
 
 # Authentication Functions
 def verify_password(plain_password, hashed_password):
@@ -187,14 +82,11 @@ def verify_password(plain_password, hashed_password):
 def get_password_hash(password):
     return pwd_context.hash(password)
 
-async def get_user(username: str):
-    user = await users_collection.find_one({"username": username})
-    if user:
-        return UserInDB(**user)
-    return None
+def get_user(db: Session, username: str):
+    return db.query(models.User).filter(models.User.username == username).first()
 
-async def authenticate_user(username: str, password: str):
-    user = await get_user(username)
+def authenticate_user(db: Session, username: str, password: str):
+    user = get_user(db, username)
     if not user:
         return False
     if not verify_password(password, user.hashed_password):
@@ -211,7 +103,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     return encoded_jwt
 
-async def get_current_user(token: str = Depends(oauth2_scheme)):
+async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -222,22 +114,22 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         username: str = payload.get("sub")
         if username is None:
             raise credentials_exception
-        token_data = TokenData(username=username)
+        token_data = schemas.TokenData(username=username)
     except JWTError:
         raise credentials_exception
-    user = await get_user(username=token_data.username)
+    user = get_user(db, username=token_data.username)
     if user is None:
         raise credentials_exception
     return user
 
-async def get_current_active_user(current_user: User = Depends(get_current_user)):
+async def get_current_active_user(current_user: models.User = Depends(get_current_user)):
     if not current_user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
 
 # Rate Limiting Middleware
 @app.middleware("http")
-async def rate_limit_middleware(request: Request, call_next):
+async def rate_limit_middleware(request: Request, call_next, db: Session = Depends(get_db)):
     if request.url.path in ["/docs", "/redoc", "/openapi.json"]:
         return await call_next(request)
         
@@ -249,11 +141,11 @@ async def rate_limit_middleware(request: Request, call_next):
     
     # Check rate limit in database
     now = time.time()
-    rate_limit_doc = await rate_limits_collection.find_one({"key": rate_limit_key})
+    rate_limit = db.query(models.RateLimit).filter(models.RateLimit.key == rate_limit_key).first()
     
-    if rate_limit_doc:
+    if rate_limit:
         # Clean up old requests
-        requests = [req for req in rate_limit_doc["requests"] if now - req < settings.RATE_LIMIT_PERIOD]
+        requests = [req for req in rate_limit.requests if now - req < settings.RATE_LIMIT_PERIOD]
         
         # Check if rate limit exceeded
         if len(requests) >= settings.RATE_LIMIT_REQUESTS:
@@ -264,25 +156,67 @@ async def rate_limit_middleware(request: Request, call_next):
         
         # Add current request
         requests.append(now)
-        await rate_limits_collection.update_one(
-            {"key": rate_limit_key},
-            {"$set": {"requests": requests, "last_updated": now}}
-        )
+        rate_limit.requests = requests
+        rate_limit.last_updated = now
+        db.commit()
     else:
         # First request for this key
-        await rate_limits_collection.insert_one({
-            "key": rate_limit_key,
-            "requests": [now],
-            "last_updated": now
-        })
+        new_rate_limit = models.RateLimit(
+            key=rate_limit_key,
+            requests=[now],
+            last_updated=now
+        )
+        db.add(new_rate_limit)
+        db.commit()
     
     response = await call_next(request)
     return response
 
+# Database initialization
+@app.on_event("startup")
+async def startup_db_client():
+    # Create all tables if they don't exist
+    Base.metadata.create_all(bind=engine)
+    
+    # Initialize default pricing plans if they don't exist
+    db = next(get_db())
+    if db.query(models.PricingPlan).count() == 0:
+        default_plans = [
+            models.PricingPlan(
+                id="free",
+                name="Free Plan",
+                description="Basic features for trying out the service",
+                price=0,
+                word_limit=1000,
+                requests_per_day=10,
+                features=["Humanize text (limited)", "AI detection (limited)"]
+            ),
+            models.PricingPlan(
+                id="basic",
+                name="Basic Plan",
+                description="Standard features for regular users",
+                price=999.00,
+                word_limit=10000,
+                requests_per_day=50,
+                features=["Humanize text", "AI detection", "Email support"]
+            ),
+            models.PricingPlan(
+                id="premium",
+                name="Premium Plan",
+                description="Advanced features for professional users",
+                price=2999.00,
+                word_limit=50000,
+                requests_per_day=100,
+                features=["Humanize text", "AI detection", "Priority support", "API access"]
+            )
+        ]
+        db.add_all(default_plans)
+        db.commit()
+
 # Authentication Endpoints
-@app.post("/token", response_model=Token)
-async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
-    user = await authenticate_user(form_data.username, form_data.password)
+@app.post("/token", response_model=schemas.Token)
+async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    user = authenticate_user(db, form_data.username, form_data.password)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -296,10 +230,10 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
     return {"access_token": access_token, "token_type": "bearer"}
 
 # User Management Endpoints
-@app.post("/users/register", response_model=User)
-async def register_user(user: UserCreate):
+@app.post("/users/register", response_model=schemas.User)
+async def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
     # Check if username already exists
-    existing_user = await users_collection.find_one({"username": user.username})
+    existing_user = db.query(models.User).filter(models.User.username == user.username).first()
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -307,7 +241,7 @@ async def register_user(user: UserCreate):
         )
     
     # Check if email already exists
-    existing_email = await users_collection.find_one({"email": user.email})
+    existing_email = db.query(models.User).filter(models.User.email == user.email).first()
     if existing_email:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -315,75 +249,59 @@ async def register_user(user: UserCreate):
         )
     
     # Create new user
-    user_id = str(uuid.uuid4())
     hashed_password = get_password_hash(user.password)
     
-    # Check if plan exists (in a real app, would validate against pricing plans table)
-    # For demo, we'll just assume it exists
+    # Check if plan exists
+    plan = db.query(models.PricingPlan).filter(models.PricingPlan.id == user.plan_id).first()
+    if not plan:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Plan '{user.plan_id}' does not exist"
+        )
     
-    new_user = {
-        "id": user_id,
-        "username": user.username,
-        "email": user.email,
-        "full_name": user.full_name,
-        "hashed_password": hashed_password,
-        "plan_id": user.plan_id,
-        "words_used": 0,
-        "payment_status": "Pending" if user.plan_id != "free" else "Paid",
-        "joined_date": datetime.utcnow(),
-        "api_keys": {},
-        "is_active": True
-    }
+    new_user = models.User(
+        username=user.username,
+        email=user.email,
+        full_name=user.full_name,
+        hashed_password=hashed_password,
+        plan_id=user.plan_id,
+        payment_status="Pending" if user.plan_id != "free" else "Paid"
+    )
     
-    await users_collection.insert_one(new_user)
-    
-    # Remove hashed_password from response
-    new_user.pop("hashed_password")
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
     
     return new_user
 
-@app.get("/users/me", response_model=User)
-async def read_users_me(current_user: User = Depends(get_current_active_user)):
+@app.get("/users/me", response_model=schemas.User)
+async def read_users_me(current_user: models.User = Depends(get_current_active_user)):
     return current_user
 
-@app.put("/users/me", response_model=User)
+@app.put("/users/me", response_model=schemas.User)
 async def update_user(
-    user_update: Dict[str, Any],
-    current_user: User = Depends(get_current_active_user)
+    user_update: schemas.UserUpdate,
+    current_user: models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
 ):
-    # Filter out fields that shouldn't be updated directly
-    protected_fields = ["id", "username", "email", "hashed_password", "joined_date"]
-    update_data = {k: v for k, v in user_update.items() if k not in protected_fields}
+    # Update user fields
+    user_data = user_update.dict(exclude_unset=True)
     
-    if not update_data:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No valid fields to update"
-        )
+    if user_data:
+        for key, value in user_data.items():
+            setattr(current_user, key, value)
+        
+        db.commit()
+        db.refresh(current_user)
     
-    # Update user in database
-    updated_user = await users_collection.find_one_and_update(
-        {"id": current_user.id},
-        {"$set": update_data},
-        return_document=ReturnDocument.AFTER
-    )
-    
-    if not updated_user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    
-    # Remove hashed_password from response
-    updated_user.pop("hashed_password", None)
-    
-    return updated_user
+    return current_user
 
 # API Gateway Endpoints for External Services
-@app.post("/api/humanize", response_model=TextResponse)
+@app.post("/api/humanize", response_model=schemas.TextResponse)
 async def humanize_text_api(
-    request: TextRequest,
-    current_user: User = Depends(get_current_active_user)
+    request: schemas.TextRequest,
+    current_user: models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
 ):
     # Check payment status
     if current_user.payment_status != "Paid":
@@ -394,17 +312,31 @@ async def humanize_text_api(
     
     # Check word limit
     word_count = len(request.input_text.split())
-    max_words = request.max_words
+    
+    # Get user's plan details
+    plan = db.query(models.PricingPlan).filter(models.PricingPlan.id == current_user.plan_id).first()
+    if not plan:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid plan associated with user"
+        )
+    
+    # Check word limit against plan
+    if word_count > plan.word_limit:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Word count exceeds plan limit ({word_count} > {plan.word_limit})"
+        )
     
     # Log the API request
-    log_entry = {
-        "user_id": current_user.id,
-        "endpoint": "/api/humanize",
-        "request_size": word_count,
-        "timestamp": datetime.utcnow(),
-        "ip_address": "N/A"  # Would normally capture from request
-    }
-    await api_logs_collection.insert_one(log_entry)
+    log_entry = models.APILog(
+        user_id=current_user.id,
+        endpoint="/api/humanize",
+        request_size=word_count,
+        ip_address="N/A"  # Would normally capture from request
+    )
+    db.add(log_entry)
+    db.commit()
     
     # Call external humanizer API
     start_time = time.time()
@@ -425,11 +357,40 @@ async def humanize_text_api(
     
     processing_time = time.time() - start_time
     
+    # Update log entry with response information
+    log_entry.response_size = len(humanized_text.split())
+    log_entry.processing_time = processing_time
+    log_entry.status_code = 200
+    
     # Update user's word count
-    await users_collection.update_one(
-        {"id": current_user.id},
-        {"$inc": {"words_used": word_count}}
-    )
+    current_user.words_used += word_count
+    
+    # Update usage statistics
+    today = datetime.utcnow()
+    usage_stat = db.query(models.UsageStat).filter(
+        models.UsageStat.user_id == current_user.id,
+        models.UsageStat.year == today.year,
+        models.UsageStat.month == today.month,
+        models.UsageStat.day == today.day
+    ).first()
+    
+    if usage_stat:
+        usage_stat.humanize_requests += 1
+        usage_stat.words_processed += word_count
+        usage_stat.total_processing_time += processing_time
+    else:
+        new_usage_stat = models.UsageStat(
+            user_id=current_user.id,
+            year=today.year,
+            month=today.month,
+            day=today.day,
+            humanize_requests=1,
+            words_processed=word_count,
+            total_processing_time=processing_time
+        )
+        db.add(new_usage_stat)
+    
+    db.commit()
     
     return {
         "result": humanized_text,
@@ -437,10 +398,11 @@ async def humanize_text_api(
         "processing_time": processing_time
     }
 
-@app.post("/api/detect", response_model=DetectionResult)
+@app.post("/api/detect", response_model=schemas.DetectionResult)
 async def detect_ai_content_api(
-    request: TextRequest,
-    current_user: User = Depends(get_current_active_user)
+    request: schemas.TextRequest,
+    current_user: models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
 ):
     # Check payment status
     if current_user.payment_status != "Paid":
@@ -449,22 +411,56 @@ async def detect_ai_content_api(
             detail="Payment required to access this feature"
         )
     
+    # Log the API request
+    word_count = len(request.input_text.split())
+    log_entry = models.APILog(
+        user_id=current_user.id,
+        endpoint="/api/detect",
+        request_size=word_count,
+        ip_address="N/A"  # Would normally capture from request
+    )
+    db.add(log_entry)
+    db.commit()
+    
     # Check for detection API URL
+    start_time = time.time()
     if not settings.AI_DETECTOR_API_URL or settings.AI_DETECTOR_API_URL == "https://ai-detector-api.example.com":
         # Use simplified internal detection if external API not available
-        from utils import detect_ai_content
         result = detect_ai_content(request.input_text)
+        processing_time = time.time() - start_time
+        
+        # Update log entry with response information
+        log_entry.processing_time = processing_time
+        log_entry.status_code = 200
+        
+        # Update usage statistics
+        today = datetime.utcnow()
+        usage_stat = db.query(models.UsageStat).filter(
+            models.UsageStat.user_id == current_user.id,
+            models.UsageStat.year == today.year,
+            models.UsageStat.month == today.month,
+            models.UsageStat.day == today.day
+        ).first()
+        
+        if usage_stat:
+            usage_stat.detect_requests += 1
+            usage_stat.words_processed += word_count
+            usage_stat.total_processing_time += processing_time
+        else:
+            new_usage_stat = models.UsageStat(
+                user_id=current_user.id,
+                year=today.year,
+                month=today.month,
+                day=today.day,
+                detect_requests=1,
+                words_processed=word_count,
+                total_processing_time=processing_time
+            )
+            db.add(new_usage_stat)
+        
+        db.commit()
+        
         return result
-    
-    # Log the API request
-    log_entry = {
-        "user_id": current_user.id,
-        "endpoint": "/api/detect",
-        "request_size": len(request.input_text.split()),
-        "timestamp": datetime.utcnow(),
-        "ip_address": "N/A"  # Would normally capture from request
-    }
-    await api_logs_collection.insert_one(log_entry)
     
     # Call external AI detection API
     async with httpx.AsyncClient() as client:
@@ -474,19 +470,57 @@ async def detect_ai_content_api(
                 json={"text": request.input_text}
             )
             response.raise_for_status()
+            processing_time = time.time() - start_time
+            
+            # Update log entry with response information
+            log_entry.processing_time = processing_time
+            log_entry.status_code = 200
+            
+            # Update usage statistics
+            today = datetime.utcnow()
+            usage_stat = db.query(models.UsageStat).filter(
+                models.UsageStat.user_id == current_user.id,
+                models.UsageStat.year == today.year,
+                models.UsageStat.month == today.month,
+                models.UsageStat.day == today.day
+            ).first()
+            
+            if usage_stat:
+                usage_stat.detect_requests += 1
+                usage_stat.words_processed += word_count
+                usage_stat.total_processing_time += processing_time
+            else:
+                new_usage_stat = models.UsageStat(
+                    user_id=current_user.id,
+                    year=today.year,
+                    month=today.month,
+                    day=today.day,
+                    detect_requests=1,
+                    words_processed=word_count,
+                    total_processing_time=processing_time
+                )
+                db.add(new_usage_stat)
+            
+            db.commit()
+            
             return response.json()
         except httpx.HTTPError as e:
             logger.error(f"Error calling AI detector API: {str(e)}")
+            log_entry.error = str(e)
+            log_entry.status_code = 503
+            db.commit()
+            
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Error connecting to AI detection service"
             )
 
 # M-Pesa Payment Integration
-@app.post("/api/payments/mpesa/initiate", response_model=MpesaPaymentResponse)
+@app.post("/api/payments/mpesa/initiate", response_model=schemas.MpesaPaymentResponse)
 async def initiate_mpesa_payment(
-    payment_request: MpesaPaymentRequest,
-    current_user: User = Depends(get_current_active_user)
+    payment_request: schemas.MpesaPaymentRequest,
+    current_user: models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
 ):
     # Check if M-Pesa credentials are configured
     if not all([
@@ -497,27 +531,26 @@ async def initiate_mpesa_payment(
     ]):
         logger.warning("M-Pesa credentials not fully configured")
         # For demo purposes, we'll simulate a successful payment initiation
+        import uuid
         checkout_request_id = str(uuid.uuid4())
         
         # Create a transaction record
-        transaction = {
-            "id": str(uuid.uuid4()),
-            "user_id": current_user.id,
-            "amount": payment_request.amount,
-            "currency": "KES",
-            "payment_method": "mpesa",
-            "status": "pending",
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow(),
-            "metadata": {
+        transaction = models.Transaction(
+            user_id=current_user.id,
+            amount=payment_request.amount,
+            currency="KES",
+            payment_method="mpesa",
+            status="pending",
+            metadata={
                 "checkout_request_id": checkout_request_id,
                 "phone_number": payment_request.phone_number,
                 "account_reference": payment_request.account_reference,
                 "transaction_desc": payment_request.transaction_desc
             }
-        }
+        )
         
-        await transactions_collection.insert_one(transaction)
+        db.add(transaction)
+        db.commit()
         
         return {
             "checkout_request_id": checkout_request_id,
@@ -538,13 +571,16 @@ async def initiate_mpesa_payment(
     }
 
 @app.post("/api/payments/mpesa/callback")
-async def mpesa_callback(callback: MpesaCallback):
+async def mpesa_callback(
+    callback: schemas.MpesaCallback,
+    db: Session = Depends(get_db)
+):
     # This would process the callback from M-Pesa after payment
     
     # Find the corresponding transaction
-    transaction = await transactions_collection.find_one(
-        {"metadata.checkout_request_id": callback.checkout_request_id}
-    )
+    transaction = db.query(models.Transaction).filter(
+        models.Transaction.metadata.contains({"checkout_request_id": callback.checkout_request_id})
+    ).first()
     
     if not transaction:
         raise HTTPException(
@@ -554,71 +590,61 @@ async def mpesa_callback(callback: MpesaCallback):
     
     # Update transaction status
     if callback.result_code == 0:  # Success
-        new_status = "completed"
+        transaction.status = "completed"
         
         # Update user's payment status
-        await users_collection.update_one(
-            {"id": transaction["user_id"]},
-            {"$set": {"payment_status": "Paid"}}
-        )
+        user = db.query(models.User).filter(models.User.id == transaction.user_id).first()
+        if user:
+            user.payment_status = "Paid"
+            db.commit()
     else:
-        new_status = "failed"
+        transaction.status = "failed"
     
-    # Update transaction
-    await transactions_collection.update_one(
-        {"metadata.checkout_request_id": callback.checkout_request_id},
-        {
-            "$set": {
-                "status": new_status,
-                "updated_at": datetime.utcnow(),
-                "metadata.mpesa_receipt_number": callback.mpesa_receipt_number,
-                "metadata.transaction_date": callback.transaction_date,
-                "metadata.result_desc": callback.result_desc
-            }
-        }
-    )
+    # Update transaction metadata
+    transaction.metadata.update({
+        "mpesa_receipt_number": callback.mpesa_receipt_number,
+        "transaction_date": callback.transaction_date,
+        "result_desc": callback.result_desc
+    })
+    
+    db.commit()
     
     return {"status": "success"}
 
 # Simulate a payment for testing (in real environment, this would be removed)
-@app.post("/api/payments/simulate", response_model=Transaction)
+@app.post("/api/payments/simulate", response_model=schemas.Transaction)
 async def simulate_payment(
     amount: float,
-    current_user: User = Depends(get_current_active_user)
+    current_user: models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
 ):
     # Create a transaction record
-    transaction_id = str(uuid.uuid4())
-    transaction = {
-        "id": transaction_id,
-        "user_id": current_user.id,
-        "amount": amount,
-        "currency": "KES",
-        "payment_method": "simulation",
-        "status": "completed",
-        "created_at": datetime.utcnow(),
-        "updated_at": datetime.utcnow(),
-        "metadata": {
-            "simulation": True
-        }
-    }
+    transaction = models.Transaction(
+        user_id=current_user.id,
+        amount=amount,
+        currency="KES",
+        payment_method="simulation",
+        status="completed",
+        metadata={"simulation": True}
+    )
     
-    await transactions_collection.insert_one(transaction)
+    db.add(transaction)
     
     # Update user's payment status
-    await users_collection.update_one(
-        {"id": current_user.id},
-        {"$set": {"payment_status": "Paid"}}
-    )
+    current_user.payment_status = "Paid"
+    
+    db.commit()
+    db.refresh(transaction)
     
     return transaction
 
 # Health Check Endpoint
 @app.get("/health")
-async def health_check():
+async def health_check(db: Session = Depends(get_db)):
     # Check database connection
     try:
-        # Simple ping to verify MongoDB connection
-        await db.command("ping")
+        # Simple query to verify database connection
+        db.execute(text("SELECT 1"))
         db_status = "healthy"
     except Exception as e:
         logger.error(f"Database health check failed: {str(e)}")
