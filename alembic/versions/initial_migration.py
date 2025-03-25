@@ -64,7 +64,7 @@ def upgrade():
         sa.Column('status', sa.String(), nullable=False),
         sa.Column('created_at', sa.DateTime(), nullable=False, server_default=sa.text('now()')),
         sa.Column('updated_at', sa.DateTime(), nullable=False, server_default=sa.text('now()')),
-        sa.Column('metadata', postgresql.JSON(astext_type=sa.Text()), nullable=False, server_default='{}'),
+        sa.Column('transaction_metadata', postgresql.JSON(astext_type=sa.Text()), nullable=False, server_default='{}'),
         sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
         sa.PrimaryKeyConstraint('id')
     )
