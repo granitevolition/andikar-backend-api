@@ -212,7 +212,51 @@ if [ $retry_count -eq $max_retries ]; then
   fi
 fi
 
-# Run database migrations
+# Check if tables already exist to avoid migration errors
+echo "Checking if database tables already exist..."
+python -c "
+import os
+import sys
+import sqlalchemy
+from sqlalchemy import create_engine, text, inspect
+
+# Get database URL from environment variable
+db_url = os.getenv('DATABASE_URL', '')
+if not db_url:
+    print('DATABASE_URL is not set')
+    sys.exit(1)
+
+try:
+    # Handle both postgres:// and postgresql:// formats
+    if db_url.startswith('postgres://'):
+        db_url = db_url.replace('postgres://', 'postgresql://', 1)
+    
+    # Create SQLAlchemy engine
+    engine = create_engine(db_url)
+    
+    # Check if 'users' table exists (as a proxy for all tables)
+    inspector = inspect(engine)
+    tables_exist = 'users' in inspector.get_table_names()
+    
+    if tables_exist:
+        print('Database tables already exist, skipping migrations')
+        # Create a flag file to indicate migrations should be skipped
+        with open('.skip_migrations', 'w') as f:
+            f.write('1')
+        sys.exit(0)
+    else:
+        print('Database tables do not exist, will run migrations')
+        # Make sure the flag file doesn't exist
+        if os.path.exists('.skip_migrations'):
+            os.remove('.skip_migrations')
+        sys.exit(0)
+except Exception as e:
+    print(f'Error checking database tables: {str(e)}')
+    # In case of error, we'll try to run migrations anyway
+    sys.exit(0)
+"
+
+# Run database migrations only if needed
 echo "Running database migrations..."
 if [[ "$DATABASE_URL" == sqlite* ]]; then
   echo "Creating SQLite database..."
@@ -220,11 +264,17 @@ if [[ "$DATABASE_URL" == sqlite* ]]; then
   mkdir -p $(dirname "${DATABASE_URL#sqlite:///}")
 fi
 
-# Run migrations with error handling
-if alembic upgrade head; then
-  echo "Database migrations completed successfully"
+# Check if we should skip migrations
+if [ -f .skip_migrations ]; then
+  echo "Skipping migrations as tables already exist"
+  rm -f .skip_migrations
 else
-  echo "WARNING: Database migrations failed, but will attempt to continue..."
+  # Run migrations with error handling
+  if alembic upgrade head; then
+    echo "Database migrations completed successfully"
+  else
+    echo "WARNING: Database migrations failed, but will attempt to continue..."
+  fi
 fi
 
 # Set the port from environment or default to 8000
