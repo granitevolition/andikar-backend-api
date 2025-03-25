@@ -11,7 +11,7 @@ A comprehensive backend API gateway that integrates the Andikar frontend with va
   - Text Humanizer API
   - AI Detection API (configurable)
   - M-Pesa Payment Processing
-- **MongoDB Integration**: Persistent storage for users, transactions, and logs
+- **PostgreSQL Database**: Persistent storage for users, transactions, and logs
 - **Rate Limiting**: Prevent API abuse
 - **Logging & Monitoring**: Comprehensive logging for debugging and analytics
 - **Health Checks**: Monitor system and service health
@@ -20,7 +20,9 @@ A comprehensive backend API gateway that integrates the Andikar frontend with va
 ## Technologies
 
 - **FastAPI**: High-performance web framework
-- **MongoDB**: NoSQL database for flexible data storage
+- **PostgreSQL**: Reliable relational database
+- **SQLAlchemy**: SQL toolkit and ORM
+- **Alembic**: Database migration tool
 - **Pydantic**: Data validation and settings management
 - **JWT**: Secure authentication
 - **HTTPX**: Asynchronous HTTP client
@@ -31,7 +33,7 @@ A comprehensive backend API gateway that integrates the Andikar frontend with va
 
 - Python 3.9+
 - Docker and Docker Compose (recommended)
-- MongoDB 4.4+ (handled by Docker)
+- PostgreSQL 13+ (handled by Docker or Railway)
 
 ## Quick Start
 
@@ -72,7 +74,7 @@ cd andikar-backend-api
 
 ```bash
 python -m venv venv
-source venv/bin/activate  # On Windows, use: venv\Scripts\activate
+source venv/bin/activate  # On Windows, use: venv\\Scripts\\activate
 ```
 
 3. Install dependencies:
@@ -88,13 +90,19 @@ cp .env.example .env
 # Edit .env file with your settings
 ```
 
-5. Start the application:
+5. Run database migrations:
+
+```bash
+alembic upgrade head
+```
+
+6. Start the application:
 
 ```bash
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-6. The API will be available at http://localhost:8000
+7. The API will be available at http://localhost:8000
 
 ## Configuration
 
@@ -106,8 +114,7 @@ The application is configured using environment variables, which can be set in t
 - `LOG_LEVEL`: Logging level (DEBUG, INFO, WARNING, ERROR)
 
 ### Database Settings
-- `MONGODB_URL`: MongoDB connection URL
-- `DATABASE_NAME`: MongoDB database name
+- `DATABASE_URL`: PostgreSQL connection URL (example: postgresql://user:password@localhost:5432/andikar)
 
 ### API Endpoints
 - `HUMANIZER_API_URL`: URL of the text humanizer API
@@ -123,6 +130,20 @@ The application is configured using environment variables, which can be set in t
 ### Rate Limiting
 - `RATE_LIMIT_REQUESTS`: Maximum requests per period
 - `RATE_LIMIT_PERIOD`: Period for rate limiting in seconds
+
+## Database Migrations
+
+This project uses Alembic for database migrations. When you make changes to the database models, you need to create a new migration:
+
+```bash
+alembic revision --autogenerate -m "Description of the change"
+```
+
+To apply the migrations:
+
+```bash
+alembic upgrade head
+```
 
 ## API Documentation
 
@@ -160,8 +181,33 @@ This application is configured for easy deployment on Railway.app:
 1. Push the repository to GitHub
 2. Create a new project on Railway.app
 3. Link the GitHub repository
-4. Add environment variables from your `.env` file
-5. Deploy the application
+4. Add the PostgreSQL database service in Railway
+5. Add necessary environment variables:
+   - `DATABASE_URL` (will be set automatically by Railway)
+   - `SECRET_KEY` (generate a secure random string)
+   - `HUMANIZER_API_URL` (your humanizer API endpoint)
+   - Other configurations as needed
+6. Deploy the application
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Database Migration Errors**: If you encounter errors during database migrations, ensure that:
+   - Your PostgreSQL database is running and accessible
+   - The database specified in `DATABASE_URL` exists
+   - You have the correct permissions to create/modify tables
+   - Models don't use reserved column names (like 'metadata')
+
+2. **PORT Environment Variable Issues**: If you see errors related to the PORT variable:
+   - Make sure the startup.sh script has executable permissions (`chmod +x startup.sh`)
+   - Use `PORT=${PORT:-8000}` syntax to provide a default value
+   - Avoid using string interpolation with environment variables in the Procfile
+
+3. **API Connection Issues**: If services aren't connecting properly:
+   - Check all API URLs in your environment variables
+   - Verify network connectivity between your application and the external services
+   - Check for any rate limiting or authentication issues with external APIs
 
 ## License
 
