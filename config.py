@@ -1,7 +1,7 @@
 import os
 from datetime import timedelta
-from pydantic import BaseSettings
 
+# Simple configuration class
 class Settings:
     PROJECT_NAME = "Andikar Backend API"
     PROJECT_VERSION = "1.0.6"
