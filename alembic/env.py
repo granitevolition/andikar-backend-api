@@ -22,7 +22,21 @@ from database import DATABASE_URL
 config = context.config
 
 # Set the SQLAlchemy URL
-config.set_main_option("sqlalchemy.url", DATABASE_URL)
+if DATABASE_URL:
+    # Mask password for logging
+    masked_url = DATABASE_URL
+    if "@" in masked_url:
+        parts = masked_url.split("@")
+        auth_parts = parts[0].split(":")
+        if len(auth_parts) > 2:
+            masked_url = f"{auth_parts[0]}:****@{parts[1]}"
+    
+    logger.info(f"Using database URL for migrations: {masked_url}")
+    config.set_main_option("sqlalchemy.url", DATABASE_URL)
+else:
+    logger.warning("DATABASE_URL not set for migrations, using SQLite")
+    sqlite_url = "sqlite:///./app.db"
+    config.set_main_option("sqlalchemy.url", sqlite_url)
 
 # Interpret the config file for Python logging
 fileConfig(config.config_file_name)
@@ -53,17 +67,30 @@ def run_migrations_online():
         try:
             logger.info(f"Attempting to connect to database for migrations (attempt {retry_count + 1}/{MAX_RETRIES})")
             
+            # Get the URL from config
+            db_url = config.get_main_option("sqlalchemy.url")
+            
+            # Configure additional args based on database type
+            connect_args = {}
+            if db_url.startswith("postgresql"):
+                connect_args = {"connect_timeout": 10}
+            elif db_url.startswith("sqlite"):
+                connect_args = {"check_same_thread": False}
+            
             # Create a custom engine with retry/reconnection settings
             connectable = create_engine(
-                DATABASE_URL,
+                db_url,
                 poolclass=pool.NullPool,
-                connect_args={"connect_timeout": 10}
+                connect_args=connect_args
             )
             
             # Test the connection before proceeding
-            with connectable.connect() as test_conn:
-                test_conn.execute("SELECT 1")
-                logger.info("Database connection successful")
+            if not db_url.startswith("sqlite"):
+                with connectable.connect() as test_conn:
+                    test_conn.execute("SELECT 1")
+                    logger.info("Database connection successful")
+            else:
+                logger.info("Using SQLite database, skipping connection test")
             
             # Now use the connection for migrations
             with connectable.connect() as connection:
@@ -89,7 +116,20 @@ def run_migrations_online():
                 time.sleep(wait_time)
             else:
                 logger.error("Max retries reached. Could not establish database connection for migrations.")
-                raise
+                if db_url.startswith("sqlite"):
+                    # For SQLite, we'll just proceed (it will create a new DB)
+                    logger.warning("Using SQLite without verified connection")
+                    connectable = create_engine(db_url, poolclass=pool.NullPool)
+                    with connectable.connect() as connection:
+                        context.configure(
+                            connection=connection, 
+                            target_metadata=target_metadata
+                        )
+                        with context.begin_transaction():
+                            context.run_migrations()
+                    break
+                else:
+                    raise
 
 if context.is_offline_mode():
     run_migrations_offline()
