@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.0.4] - 2025-03-25
+
+### Fixed
+- Added support for `DATABASE_PUBLIC_URL` when `DATABASE_URL` is not reachable
+- Added network diagnostics tools to Docker image for better connection debugging
+- Added automatic host reachability checks with fallback to public URLs
+- Enhanced database connection code to try multiple connection methods
+- Added IP resolution diagnostics to help troubleshoot Railway networking issues
+- Improved SQLite fallback mechanisms when PostgreSQL is unavailable
+
 ## [1.0.3] - 2025-03-25
 
 ### Fixed
