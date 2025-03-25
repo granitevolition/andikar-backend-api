@@ -23,5 +23,5 @@ EXPOSE 8080
 # Set PYTHONUNBUFFERED to ensure log output is visible
 ENV PYTHONUNBUFFERED=1
 
-# CMD is ignored by Railway when using Procfile
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "${PORT:-8080}"]
+# Use start.py instead of direct uvicorn command
+CMD ["python", "start.py"]
