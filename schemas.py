@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, EmailStr, validator
+from pydantic import BaseModel, Field, EmailStr, ConfigDict
 from typing import Dict, List, Optional, Any, Union
 from datetime import datetime
 import uuid
@@ -35,8 +35,7 @@ class User(UserBase):
     api_keys: Dict[str, str] = {}
     is_active: bool = True
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 class UserInDB(User):
     hashed_password: str
@@ -95,8 +94,7 @@ class Transaction(TransactionBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 # Pricing plan schemas
 class PricingPlanBase(BaseModel):
@@ -118,8 +116,7 @@ class PricingPlan(PricingPlanBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 # API log schemas
 class APILogCreate(BaseModel):
@@ -137,8 +134,7 @@ class APILog(APILogCreate):
     id: str
     timestamp: datetime
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 # Rate limit schemas
 class RateLimitCreate(BaseModel):
@@ -150,8 +146,7 @@ class RateLimitCreate(BaseModel):
 class RateLimit(RateLimitCreate):
     id: str
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 # Webhook schemas
 class WebhookBase(BaseModel):
@@ -170,8 +165,7 @@ class Webhook(WebhookBase):
     updated_at: datetime
     last_triggered: Optional[Dict[str, Any]] = None
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 # Usage stats schemas
 class UsageStatCreate(BaseModel):
@@ -188,5 +182,4 @@ class UsageStat(UsageStatCreate):
     id: str
     updated_at: datetime
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
