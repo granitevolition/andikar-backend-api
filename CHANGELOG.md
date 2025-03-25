@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.0.6] - 2025-03-25
+
+### Fixed
+- Fixed database migration error with existing tables by adding checks before running migrations
+- Added improved global exception handling in FastAPI app
+- Enhanced error logging with stack traces for better debugging
+- Improved root endpoint with detailed environment information
+- Added better authentication error handling
+- Fixed Transaction model field references in callback endpoint
+
 ## [1.0.5] - 2025-03-25
 
 ### Fixed
