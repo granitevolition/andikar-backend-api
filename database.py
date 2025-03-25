@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import os
@@ -133,7 +133,8 @@ def get_engine():
             # Test the connection (for non-SQLite databases)
             if not DATABASE_URL.startswith("sqlite"):
                 with engine.connect() as conn:
-                    conn.execute("SELECT 1")
+                    # Use text() to properly prepare SQL statements
+                    conn.execute(text("SELECT 1"))
             logger.info("Successfully connected to the database")
             return engine
         except Exception as e:
