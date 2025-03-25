@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.5] - 2025-03-25
+
+### Fixed
+- Fixed SQLAlchemy SQL execution error by using text() function for prepared statements
+- Updated database connection code in all modules to use text() function
+- Improved error handling for database connections 
+- Fixed compatibility issue with newer versions of SQLAlchemy
+
 ## [1.0.4] - 2025-03-25
 
 ### Fixed
