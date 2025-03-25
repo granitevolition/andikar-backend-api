@@ -1,1 +1,1 @@
-web: python start.py
+web: python dual_app.py
