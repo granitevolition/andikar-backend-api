@@ -199,6 +199,11 @@ async def startup_db_client():
             logger.info("Created default admin user")
         
         logger.info("Database initialized successfully")
+        
+        # Import and include admin routes after app creation to avoid circular imports
+        from admin import admin_router
+        app.include_router(admin_router)
+        logger.info("Admin routes registered")
     except Exception as e:
         logger.error(f"Error initializing database: {str(e)}")
         logger.error(traceback.format_exc())
@@ -723,10 +728,6 @@ async def root():
         "health_check": "/health",
         "admin_dashboard": "/admin"
     }
-
-# Import admin routes - must be imported after app is created to avoid circular imports
-from admin import admin_router
-app.include_router(admin_router)
 
 # Main entry point
 if __name__ == "__main__":
