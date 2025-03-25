@@ -19,20 +19,6 @@ import traceback
 # Import configuration
 from config import settings
 
-# Import database and models
-from database import get_db, engine
-import models
-from models import Base
-import schemas
-from utils import detect_ai_content
-
-# Import authentication utilities
-from auth import (
-    verify_password, get_password_hash, authenticate_user,
-    create_access_token, get_current_user, get_current_active_user,
-    oauth2_scheme, pwd_context
-)
-
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
@@ -54,6 +40,42 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+# Simple health check that doesn't depend on database
+@app.get("/health")
+async def health_check():
+    return {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+
+# Root endpoint
+@app.get("/")
+async def root():
+    return {
+        "name": settings.PROJECT_NAME,
+        "version": settings.PROJECT_VERSION,
+        "description": "Backend API Gateway for Andikar AI services",
+        "status": "up and running",
+        "timestamp": datetime.utcnow().isoformat(),
+        "documentation": "/docs",
+        "health_check": "/health"
+    }
+
+# Import other modules after FastAPI app is created
+# This ensures the app object is available and avoids circular imports
+from database import get_db, engine
+import models
+from models import Base
+import schemas
+from utils import detect_ai_content
+
+# Import authentication utilities
+from auth import (
+    verify_password, get_password_hash, authenticate_user,
+    create_access_token, get_current_user, get_current_active_user,
+    oauth2_scheme, pwd_context
 )
 
 # Create templates directory if it doesn't exist
@@ -297,6 +319,34 @@ async def update_user(
     
     return current_user
 
+# Initialize database
+@app.post("/api/init-db")
+async def init_db():
+    """
+    Initialize the database (admin-only endpoint for manual initialization)
+    """
+    try:
+        # Run database initialization
+        import subprocess
+        import sys
+        
+        result = subprocess.run([sys.executable, "init_db.py"], 
+                              capture_output=True, 
+                              text=True)
+        
+        return {
+            "success": True,
+            "message": "Database initialized successfully",
+            "details": result.stdout
+        }
+    except Exception as e:
+        logger.error(f"Database initialization failed: {str(e)}")
+        return {
+            "success": False,
+            "message": "Database initialization failed",
+            "error": str(e)
+        }
+
 # API Gateway Endpoints for External Services
 @app.post("/api/humanize", response_model=schemas.TextResponse)
 async def humanize_text_api(
@@ -523,243 +573,6 @@ async def detect_ai_content_api(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Error connecting to AI detection service"
         )
-
-# M-Pesa Payment Integration
-@app.post("/api/payments/mpesa/initiate", response_model=schemas.MpesaPaymentResponse)
-async def initiate_mpesa_payment(
-    payment_request: schemas.MpesaPaymentRequest,
-    current_user: models.User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    # Check if M-Pesa credentials are configured
-    if not all([
-        settings.MPESA_CONSUMER_KEY,
-        settings.MPESA_CONSUMER_SECRET,
-        settings.MPESA_PASSKEY,
-        settings.MPESA_SHORTCODE
-    ]):
-        logger.warning("M-Pesa credentials not fully configured")
-        # For demo purposes, we'll simulate a successful payment initiation
-        import uuid
-        checkout_request_id = str(uuid.uuid4())
-        
-        # Create a transaction record
-        transaction = models.Transaction(
-            user_id=current_user.id,
-            amount=payment_request.amount,
-            currency="KES",
-            payment_method="mpesa",
-            status="pending",
-            transaction_metadata={
-                "checkout_request_id": checkout_request_id,
-                "phone_number": payment_request.phone_number,
-                "account_reference": payment_request.account_reference,
-                "transaction_desc": payment_request.transaction_desc
-            }
-        )
-        
-        db.add(transaction)
-        db.commit()
-        
-        return {
-            "checkout_request_id": checkout_request_id,
-            "response_code": "0",
-            "response_description": "Success",
-            "customer_message": "Success. Request accepted for processing"
-        }
-    
-    # In a real implementation, this would make an API call to the M-Pesa API
-    # For security, we'd need to properly implement OAuth, formatting, etc.
-    
-    # Simulated response
-    return {
-        "checkout_request_id": "ws_CO_123456789",
-        "response_code": "0",
-        "response_description": "Success",
-        "customer_message": "Success. Request accepted for processing"
-    }
-
-@app.post("/api/payments/mpesa/callback")
-async def mpesa_callback(
-    callback: schemas.MpesaCallback,
-    db: Session = Depends(get_db)
-):
-    # This would process the callback from M-Pesa after payment
-    
-    # Find the corresponding transaction
-    transaction = db.query(models.Transaction).filter(
-        models.Transaction.transaction_metadata.contains({"checkout_request_id": callback.checkout_request_id})
-    ).first()
-    
-    if not transaction:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Transaction not found"
-        )
-    
-    # Update transaction status
-    if callback.result_code == 0:  # Success
-        transaction.status = "completed"
-        
-        # Update user's payment status
-        user = db.query(models.User).filter(models.User.id == transaction.user_id).first()
-        if user:
-            user.payment_status = "Paid"
-            db.commit()
-    else:
-        transaction.status = "failed"
-    
-    # Update transaction metadata
-    transaction.transaction_metadata.update({
-        "mpesa_receipt_number": callback.mpesa_receipt_number,
-        "transaction_date": callback.transaction_date,
-        "result_desc": callback.result_desc
-    })
-    
-    db.commit()
-    
-    return {"status": "success"}
-
-# Simulate a payment for testing (in real environment, this would be removed)
-@app.post("/api/payments/simulate", response_model=schemas.Transaction)
-async def simulate_payment(
-    amount: float,
-    current_user: models.User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    # Create a transaction record
-    transaction = models.Transaction(
-        user_id=current_user.id,
-        amount=amount,
-        currency="KES",
-        payment_method="simulation",
-        status="completed",
-        transaction_metadata={"simulation": True}
-    )
-    
-    db.add(transaction)
-    
-    # Update user's payment status
-    current_user.payment_status = "Paid"
-    
-    db.commit()
-    db.refresh(transaction)
-    
-    return transaction
-
-# Initialize database
-@app.post("/api/init-db")
-async def init_db():
-    """
-    Initialize the database (admin-only endpoint for manual initialization)
-    """
-    try:
-        # Run database initialization
-        import subprocess
-        import sys
-        
-        result = subprocess.run([sys.executable, "init_db.py"], 
-                              capture_output=True, 
-                              text=True)
-        
-        return {
-            "success": True,
-            "message": "Database initialized successfully",
-            "details": result.stdout
-        }
-    except Exception as e:
-        logger.error(f"Database initialization failed: {str(e)}")
-        return {
-            "success": False,
-            "message": "Database initialization failed",
-            "error": str(e)
-        }
-
-# Health Check Endpoint
-@app.get("/health")
-async def health_check(db: Session = Depends(get_db)):
-    # Check database connection
-    try:
-        # Simple query to verify database connection
-        db.execute(text("SELECT 1"))
-        db_status = "healthy"
-    except Exception as e:
-        logger.error(f"Database health check failed: {str(e)}")
-        db_status = "unhealthy"
-    
-    # Check external services
-    services_status = {}
-    
-    # Check Humanizer API
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(f"{settings.HUMANIZER_API_URL}/", timeout=5.0)
-            services_status["humanizer"] = "healthy" if response.status_code == 200 else "unhealthy"
-    except Exception:
-        services_status["humanizer"] = "unhealthy"
-    
-    # Check AI Detector API (if configured)
-    if settings.AI_DETECTOR_API_URL and settings.AI_DETECTOR_API_URL != "https://ai-detector-api.example.com":
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(f"{settings.AI_DETECTOR_API_URL}/", timeout=5.0)
-                services_status["ai_detector"] = "healthy" if response.status_code == 200 else "unhealthy"
-        except Exception:
-            services_status["ai_detector"] = "unhealthy"
-    else:
-        services_status["ai_detector"] = "not_configured"
-    
-    overall_status = "healthy" if db_status == "healthy" and all(
-        status == "healthy" or status == "not_configured" for status in services_status.values()
-    ) else "unhealthy"
-    
-    return {
-        "status": overall_status,
-        "timestamp": datetime.utcnow().isoformat(),
-        "services": {
-            "database": db_status,
-            **services_status
-        }
-    }
-
-# Root endpoint
-@app.get("/")
-async def root():
-    env_info = {}
-    
-    # List of environment variables to include (without sensitive values)
-    env_vars_to_show = [
-        "RAILWAY_PROJECT_NAME", 
-        "RAILWAY_SERVICE_NAME", 
-        "RAILWAY_ENVIRONMENT_NAME",
-        "RAILWAY_PUBLIC_DOMAIN",
-        "HUMANIZER_API_URL"
-    ]
-    
-    for var in env_vars_to_show:
-        env_info[var] = os.getenv(var, "Not set")
-    
-    # Add database type info
-    db_url = os.getenv("DATABASE_URL", "")
-    if db_url:
-        db_type = db_url.split(":")[0]
-        db_info = f"{db_type} database"
-        if "@" in db_url:
-            host = db_url.split("@")[1].split("/")[0]
-            db_info += f" at {host}"
-        env_info["DATABASE_TYPE"] = db_info
-    
-    return {
-        "name": settings.PROJECT_NAME,
-        "version": settings.PROJECT_VERSION,
-        "description": "Backend API Gateway for Andikar AI services",
-        "status": "up and running",
-        "environment": env_info,
-        "timestamp": datetime.utcnow().isoformat(),
-        "documentation": "/docs",
-        "health_check": "/health",
-        "admin_dashboard": "/admin"
-    }
 
 # Main entry point
 if __name__ == "__main__":
