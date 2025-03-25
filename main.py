@@ -21,8 +21,8 @@ import traceback
 # Import database and models
 from database import get_db, engine
 import models
-import schemas
 from models import Base
+import schemas
 from utils import detect_ai_content
 
 # Import admin routes
@@ -31,7 +31,7 @@ from admin import admin_router
 # Configuration
 class Settings:
     PROJECT_NAME = "Andikar Backend API"
-    PROJECT_VERSION = "1.0.5"
+    PROJECT_VERSION = "1.0.6"
     
     # JWT Settings
     SECRET_KEY = os.getenv("SECRET_KEY", "mysecretkey")
@@ -78,8 +78,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Create templates directory if it doesn't exist
+os.makedirs("templates", exist_ok=True)
+os.makedirs("static", exist_ok=True)
+
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Set up templates
+templates = Jinja2Templates(directory="templates")
 
 # Security
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -223,10 +230,13 @@ async def startup_db_client():
     try:
         # Create all tables if they don't exist
         Base.metadata.create_all(bind=engine)
+        logger.info("Created database tables")
         
         # Initialize default pricing plans if they don't exist
         db = next(get_db())
+        
         if db.query(models.PricingPlan).count() == 0:
+            logger.info("Initializing default pricing plans")
             default_plans = [
                 models.PricingPlan(
                     id="free",
@@ -258,9 +268,11 @@ async def startup_db_client():
             ]
             db.add_all(default_plans)
             db.commit()
+            logger.info("Created default pricing plans")
         
         # Create an admin user if it doesn't exist
         if not db.query(models.User).filter(models.User.username == "admin").first():
+            logger.info("Creating admin user")
             admin_user = models.User(
                 username="admin",
                 email="admin@andikar.com",
@@ -408,20 +420,27 @@ async def humanize_text_api(
     
     # Call external humanizer API
     start_time = time.time()
-    async with httpx.AsyncClient() as client:
-        try:
+    try:
+        async with httpx.AsyncClient() as client:
             response = await client.post(
                 f"{settings.HUMANIZER_API_URL}/humanize_text",
-                json={"input_text": request.input_text}
+                json={"input_text": request.input_text},
+                timeout=30.0
             )
             response.raise_for_status()
             humanized_text = response.json()["result"]
-        except httpx.HTTPError as e:
-            logger.error(f"Error calling humanizer API: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Error connecting to humanizer service"
-            )
+    except httpx.HTTPError as e:
+        logger.error(f"Error calling humanizer API: {str(e)}")
+        
+        # Update log entry with error information
+        log_entry.error = str(e)
+        log_entry.status_code = 503
+        db.commit()
+        
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Error connecting to humanizer service"
+        )
     
     processing_time = time.time() - start_time
     
@@ -531,11 +550,12 @@ async def detect_ai_content_api(
         return result
     
     # Call external AI detection API
-    async with httpx.AsyncClient() as client:
-        try:
+    try:
+        async with httpx.AsyncClient() as client:
             response = await client.post(
                 f"{settings.AI_DETECTOR_API_URL}/detect",
-                json={"text": request.input_text}
+                json={"text": request.input_text},
+                timeout=30.0
             )
             response.raise_for_status()
             processing_time = time.time() - start_time
@@ -572,16 +592,16 @@ async def detect_ai_content_api(
             db.commit()
             
             return response.json()
-        except httpx.HTTPError as e:
-            logger.error(f"Error calling AI detector API: {str(e)}")
-            log_entry.error = str(e)
-            log_entry.status_code = 503
-            db.commit()
-            
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Error connecting to AI detection service"
-            )
+    except httpx.HTTPError as e:
+        logger.error(f"Error calling AI detector API: {str(e)}")
+        log_entry.error = str(e)
+        log_entry.status_code = 503
+        db.commit()
+        
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Error connecting to AI detection service"
+        )
 
 # M-Pesa Payment Integration
 @app.post("/api/payments/mpesa/initiate", response_model=schemas.MpesaPaymentResponse)
