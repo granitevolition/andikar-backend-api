@@ -1,0 +1,200 @@
+/* Admin Dashboard Custom Styles */
+
+:root {
+  --andikar-primary: #0d6efd;
+  --andikar-secondary: #6c757d;
+  --andikar-success: #198754;
+  --andikar-info: #0dcaf0;
+  --andikar-warning: #ffc107;
+  --andikar-danger: #dc3545;
+  --andikar-light: #f8f9fa;
+  --andikar-dark: #343a40;
+}
+
+/* Enhance sidebar */
+.sidebar {
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s;
+}
+
+.sidebar .brand i {
+  color: var(--andikar-primary);
+}
+
+.sidebar .nav-link:hover {
+  border-left: 3px solid var(--andikar-primary);
+  padding-left: 17px;
+}
+
+.sidebar .nav-link.active {
+  border-left: 3px solid var(--andikar-info);
+  padding-left: 17px;
+}
+
+/* Card enhancements */
+.card {
+  transition: transform 0.3s, box-shadow 0.3s;
+}
+
+.card:hover {
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+}
+
+/* Stat cards */
+.stat-card .icon {
+  transition: transform 0.3s;
+}
+
+.stat-card:hover .icon {
+  transform: scale(1.1);
+}
+
+/* Table enhancements */
+.table th {
+  border-top: none;
+  border-bottom: 2px solid #dee2e6;
+  text-transform: uppercase;
+  font-size: 0.8rem;
+  letter-spacing: 0.5px;
+}
+
+.table-hover tbody tr:hover {
+  background-color: rgba(13, 110, 253, 0.05);
+}
+
+/* Button enhancements */
+.btn {
+  transition: all 0.3s;
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 10px rgba(13, 110, 253, 0.3);
+}
+
+/* Form enhancements */
+.form-control:focus {
+  border-color: var(--andikar-primary);
+  box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+}
+
+/* Chart enhancements */
+canvas {
+  transition: all 0.3s;
+}
+
+canvas:hover {
+  filter: brightness(1.03);
+}
+
+/* Animation for alerts */
+.alert {
+  animation: fadeIn 0.5s;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Mobile view tweaks */
+@media (max-width: 768px) {
+  .stat-card {
+    padding: 15px;
+  }
+  
+  .stat-card .icon {
+    width: 45px;
+    height: 45px;
+    font-size: 18px;
+  }
+  
+  .stat-card .stat-content .value {
+    font-size: 20px;
+  }
+  
+  .header h1 {
+    font-size: 1.5rem;
+  }
+}
+
+/* Custom badges */
+.badge.bg-success-light,
+.badge.bg-warning-light,
+.badge.bg-danger-light,
+.badge.bg-info-light {
+  font-weight: 500;
+  padding: 5px 8px;
+  border-radius: 4px;
+}
+
+/* Links in tables */
+.table td a {
+  text-decoration: none;
+  color: var(--andikar-primary);
+  font-weight: 500;
+  transition: all 0.2s;
+}
+
+.table td a:hover {
+  color: darken(var(--andikar-primary), 15%);
+  text-decoration: underline;
+}
+
+/* User profile customizations */
+.avatar {
+  width: 80px;
+  height: 80px;
+  font-size: 32px;
+}
+
+/* System status indicators */
+.system-status {
+  box-shadow: 0 0 5px rgba(0, 0, 0, 0.2);
+}
+
+/* Tooltip customization */
+.tooltip .tooltip-inner {
+  background-color: var(--andikar-dark);
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+/* Login form customization */
+.login-form {
+  max-width: 400px;
+  margin: 50px auto;
+  padding: 30px;
+  background-color: white;
+  border-radius: 8px;
+  box-shadow: 0 5px 20px rgba(0, 0, 0, 0.1);
+}
+
+.login-form .logo {
+  text-align: center;
+  margin-bottom: 30px;
+}
+
+.login-form .logo i {
+  font-size: 48px;
+  color: var(--andikar-primary);
+}
+
+.login-form h2 {
+  font-size: 24px;
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+.login-form .btn-login {
+  width: 100%;
+  padding: 10px;
+  font-size: 16px;
+}
