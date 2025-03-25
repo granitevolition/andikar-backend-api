@@ -5,7 +5,7 @@ import time
 import logging
 import socket
 import urllib.parse
-from sqlalchemy import engine_from_config, create_engine
+from sqlalchemy import engine_from_config, create_engine, text
 from sqlalchemy import pool
 from alembic import context
 
@@ -145,7 +145,8 @@ def run_migrations_online():
             # Test the connection before proceeding
             if not db_url.startswith("sqlite"):
                 with connectable.connect() as test_conn:
-                    test_conn.execute("SELECT 1")
+                    # Use text() for SQL execution
+                    test_conn.execute(text("SELECT 1"))
                     logger.info("Database connection successful")
             else:
                 logger.info("Using SQLite database, skipping connection test")
