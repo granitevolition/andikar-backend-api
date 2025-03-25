@@ -23,5 +23,5 @@ EXPOSE 8080
 # Set PYTHONUNBUFFERED to ensure log output is visible
 ENV PYTHONUNBUFFERED=1
 
-# Use start.py instead of direct uvicorn command
-CMD ["python", "start.py"]
+# Use dual_app.py as the entrypoint
+CMD ["python", "dual_app.py"]
