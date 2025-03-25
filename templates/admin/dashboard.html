@@ -1,0 +1,294 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Dashboard - Andikar Admin{% endblock %}
+
+{% block header %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="row">
+    <!-- User Stats -->
+    <div class="col-md-4">
+        <div class="card">
+            <div class="stat-card">
+                <div class="icon bg-primary">
+                    <i class="fas fa-users"></i>
+                </div>
+                <div class="stat-content">
+                    <div class="value">{{ stats.users.total }}</div>
+                    <div class="label">Total Users</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Transaction Stats -->
+    <div class="col-md-4">
+        <div class="card">
+            <div class="stat-card">
+                <div class="icon bg-success">
+                    <i class="fas fa-money-bill-wave"></i>
+                </div>
+                <div class="stat-content">
+                    <div class="value">{{ stats.transactions.successful }}</div>
+                    <div class="label">Successful Payments</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- API Stats -->
+    <div class="col-md-4">
+        <div class="card">
+            <div class="stat-card">
+                <div class="icon bg-info">
+                    <i class="fas fa-cloud"></i>
+                </div>
+                <div class="stat-content">
+                    <div class="value">{{ stats.api.total_requests }}</div>
+                    <div class="label">Total API Requests</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <!-- User Chart -->
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-chart-line me-2"></i> User Registrations (Last 30 Days)
+            </div>
+            <div class="card-body">
+                <canvas id="userChart" height="250"></canvas>
+            </div>
+        </div>
+    </div>
+    
+    <!-- API Usage Chart -->
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-chart-bar me-2"></i> API Usage (Last 30 Days)
+            </div>
+            <div class="card-body">
+                <canvas id="apiChart" height="250"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <!-- Recent Users -->
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-user-clock me-2"></i> Recent Users
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>Username</th>
+                                <th>Email</th>
+                                <th>Plan</th>
+                                <th>Status</th>
+                                <th>Joined</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for user in stats.users.recent %}
+                            <tr>
+                                <td>
+                                    <a href="/admin/users/{{ user.id }}">{{ user.username }}</a>
+                                </td>
+                                <td>{{ user.email }}</td>
+                                <td>
+                                    <span class="badge bg-info-light">{{ user.plan_id }}</span>
+                                </td>
+                                <td>
+                                    {% if user.payment_status == "Paid" %}
+                                    <span class="badge bg-success-light">Paid</span>
+                                    {% else %}
+                                    <span class="badge bg-warning-light">{{ user.payment_status }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ user.joined_date.strftime('%Y-%m-%d') }}</td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="5" class="text-center">No users found</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="card-footer text-end">
+                <a href="/admin/users" class="btn btn-sm btn-primary">View All Users</a>
+            </div>
+        </div>
+    </div>
+    
+    <!-- System Status -->
+    <div class="col-lg-6">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-server me-2"></i> System Status
+            </div>
+            <div class="card-body">
+                <div class="list-group">
+                    <div class="list-group-item d-flex justify-content-between align-items-center">
+                        Database
+                        <span>
+                            <span class="system-status {{ system.database }}"></span>
+                            {{ system.database|capitalize }}
+                        </span>
+                    </div>
+                    <div class="list-group-item d-flex justify-content-between align-items-center">
+                        Humanizer API
+                        <span>
+                            <span class="system-status {{ system.humanizer }}"></span>
+                            {{ system.humanizer|replace('_', ' ')|capitalize }}
+                        </span>
+                    </div>
+                    <div class="list-group-item d-flex justify-content-between align-items-center">
+                        AI Detector API
+                        <span>
+                            <span class="system-status {{ system.detector }}"></span>
+                            {{ system.detector|replace('_', ' ')|capitalize }}
+                        </span>
+                    </div>
+                    <div class="list-group-item d-flex justify-content-between align-items-center">
+                        M-Pesa Integration
+                        <span>
+                            <span class="system-status {{ system.mpesa }}"></span>
+                            {{ system.mpesa|replace('_', ' ')|capitalize }}
+                        </span>
+                    </div>
+                </div>
+                
+                <h6 class="mt-4 mb-3">System Information</h6>
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <tbody>
+                            <tr>
+                                <th width="40%">Version</th>
+                                <td>{{ system.info.version }}</td>
+                            </tr>
+                            <tr>
+                                <th>Environment</th>
+                                <td>{{ system.info.python_env }}</td>
+                            </tr>
+                            {% if system.info.railway_project != "Not on Railway" %}
+                            <tr>
+                                <th>Railway Project</th>
+                                <td>{{ system.info.railway_project }}</td>
+                            </tr>
+                            <tr>
+                                <th>Railway Service</th>
+                                <td>{{ system.info.railway_service }}</td>
+                            </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="card-footer text-end">
+                <a href="/health" class="btn btn-sm btn-secondary" target="_blank">Check Health</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Chart data
+    const userData = {{ charts.daily_users|safe }};
+    const apiUsageData = {{ charts.daily_api_usage|safe }};
+    
+    // User chart
+    const userLabels = userData.map(item => item.date);
+    const userValues = userData.map(item => item.count);
+    
+    const userCtx = document.getElementById('userChart').getContext('2d');
+    new Chart(userCtx, {
+        type: 'line',
+        data: {
+            labels: userLabels,
+            datasets: [{
+                label: 'New Users',
+                data: userValues,
+                backgroundColor: 'rgba(13, 110, 253, 0.1)',
+                borderColor: 'rgba(13, 110, 253, 1)',
+                borderWidth: 2,
+                tension: 0.3,
+                fill: true
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        precision: 0
+                    }
+                }
+            },
+            plugins: {
+                legend: {
+                    display: false
+                }
+            }
+        }
+    });
+    
+    // API usage chart
+    const apiLabels = apiUsageData.map(item => item.date);
+    const humanizeValues = apiUsageData.map(item => item.humanize);
+    const detectValues = apiUsageData.map(item => item.detect);
+    
+    const apiCtx = document.getElementById('apiChart').getContext('2d');
+    new Chart(apiCtx, {
+        type: 'bar',
+        data: {
+            labels: apiLabels,
+            datasets: [
+                {
+                    label: 'Humanize',
+                    data: humanizeValues,
+                    backgroundColor: 'rgba(13, 202, 240, 0.7)',
+                    borderColor: 'rgba(13, 202, 240, 1)',
+                    borderWidth: 1
+                },
+                {
+                    label: 'Detect',
+                    data: detectValues,
+                    backgroundColor: 'rgba(25, 135, 84, 0.7)',
+                    borderColor: 'rgba(25, 135, 84, 1)',
+                    borderWidth: 1
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        precision: 0
+                    }
+                },
+                x: {
+                    stacked: false
+                }
+            }
+        }
+    });
+</script>
+{% endblock %}
