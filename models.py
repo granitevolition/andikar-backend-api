@@ -36,7 +36,7 @@ class Transaction(Base):
     status = Column(String)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
-    metadata = Column(JSON, default=lambda: {})
+    transaction_metadata = Column(JSON, default=lambda: {})  # Renamed from metadata to transaction_metadata
 
     user = relationship("User", back_populates="transactions")
 
