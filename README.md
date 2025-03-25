@@ -115,6 +115,9 @@ The application is configured using environment variables, which can be set in t
 
 ### Database Settings
 - `DATABASE_URL`: PostgreSQL connection URL (example: postgresql://user:password@localhost:5432/andikar)
+  - If not set, the app will look for individual PostgreSQL variables:
+  - `PGHOST`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`, `PGPORT`
+  - If none of these are available, the app will fall back to SQLite
 
 ### API Endpoints
 - `HUMANIZER_API_URL`: URL of the text humanizer API
@@ -178,16 +181,52 @@ The API documentation is available at http://localhost:8000/docs when the applic
 
 This application is configured for easy deployment on Railway.app:
 
-1. Push the repository to GitHub
-2. Create a new project on Railway.app
-3. Link the GitHub repository
-4. Add the PostgreSQL database service in Railway
-5. Add necessary environment variables:
-   - `DATABASE_URL` (will be set automatically by Railway)
-   - `SECRET_KEY` (generate a secure random string)
-   - `HUMANIZER_API_URL` (your humanizer API endpoint)
-   - Other configurations as needed
-6. Deploy the application
+1. **Create a new project on Railway**:
+   - Go to [Railway Dashboard](https://railway.app/dashboard)
+   - Click "New Project"
+   - Choose "Deploy from GitHub repo"
+   - Select the "andikar-backend-api" repository
+
+2. **Add PostgreSQL service**:
+   - In your project, click "New Service"
+   - Choose "Database" → "PostgreSQL"
+   - This will automatically create a PostgreSQL database
+
+3. **Connect the services**:
+   - In your application settings (not the database):
+   - Go to "Variables" tab
+   - Click "Add Variables" → "From database"
+   - Select your PostgreSQL database
+   - This will add all the necessary PostgreSQL variables
+
+4. **Add additional environment variables**:
+   - `SECRET_KEY`: Generate a secure random string
+   - `HUMANIZER_API_URL`: Your humanizer API endpoint (e.g., https://web-production-3db6c.up.railway.app/humanize_text)
+   - Other variables as needed
+
+5. **Deploy the application**:
+   - Railway will automatically deploy your application
+   - If needed, you can manually trigger a deployment from the "Deployments" tab
+
+6. **Verify the deployment**:
+   - Check the logs to make sure the application started correctly
+   - Visit your application URL to see if it's responding
+
+### Common Deployment Issues
+
+1. **Database Connection Issues**:
+   - Make sure the DATABASE_URL or PostgreSQL variables are set
+   - Check that the database service is running and accessible
+   - The application now has fallback mechanisms to handle missing database variables
+
+2. **Environment Variables**:
+   - Ensure all required environment variables are set
+   - Check for typos in variable names
+   - Use the "Variables" section in Railway to manage environment variables
+
+3. **Deployment Failures**:
+   - Check the deployment logs for detailed error messages
+   - The application is designed to provide meaningful error messages and fallbacks
 
 ## Troubleshooting
 
@@ -208,6 +247,11 @@ This application is configured for easy deployment on Railway.app:
    - Check all API URLs in your environment variables
    - Verify network connectivity between your application and the external services
    - Check for any rate limiting or authentication issues with external APIs
+
+4. **Railway PostgreSQL Variables**: If you're using Railway's PostgreSQL:
+   - The application automatically looks for `PGHOST`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` variables
+   - Make sure you've linked your database with your app in Railway dashboard
+   - When linking, Railway automatically sets these environment variables
 
 ## License
 
