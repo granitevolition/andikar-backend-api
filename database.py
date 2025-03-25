@@ -5,17 +5,64 @@ import os
 import time
 import logging
 import urllib.parse
+import socket
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Get database URL from environment variable
+# Get database URLs from environment variables
 DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_PUBLIC_URL = os.getenv("DATABASE_PUBLIC_URL")
 
-# Check for alternative PostgreSQL environment variables (Railway provides these)
-if not DATABASE_URL:
-    logger.warning("DATABASE_URL not found, checking for PostgreSQL environment variables...")
+# Print available database URLs (masked)
+if DATABASE_URL:
+    masked_url = DATABASE_URL.replace(DATABASE_URL.split('@')[0].split(':')[-1], '****') if '@' in DATABASE_URL else DATABASE_URL
+    logger.info(f"Found DATABASE_URL: {masked_url}")
+
+if DATABASE_PUBLIC_URL:
+    masked_url = DATABASE_PUBLIC_URL.replace(DATABASE_PUBLIC_URL.split('@')[0].split(':')[-1], '****') if '@' in DATABASE_PUBLIC_URL else DATABASE_PUBLIC_URL
+    logger.info(f"Found DATABASE_PUBLIC_URL: {masked_url}")
+
+# Function to check if a host is reachable
+def is_host_reachable(host, port, timeout=3):
+    try:
+        socket.setdefaulttimeout(timeout)
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.connect((host, port))
+        s.close()
+        return True
+    except:
+        return False
+
+# Determine which database URL to use
+final_database_url = None
+
+# First try with DATABASE_URL (internal)
+if DATABASE_URL:
+    # Parse the URL to get host and port
+    parsed = urllib.parse.urlparse(DATABASE_URL)
+    if parsed.hostname:
+        if is_host_reachable(parsed.hostname, parsed.port or 5432):
+            logger.info(f"Internal database host {parsed.hostname} is reachable. Using DATABASE_URL.")
+            final_database_url = DATABASE_URL
+        else:
+            logger.warning(f"Internal database host {parsed.hostname} is not reachable.")
+
+# If internal URL doesn't work, try with public URL
+if not final_database_url and DATABASE_PUBLIC_URL:
+    # Parse the URL to get host and port
+    parsed = urllib.parse.urlparse(DATABASE_PUBLIC_URL)
+    if parsed.hostname:
+        if is_host_reachable(parsed.hostname, parsed.port or 5432):
+            logger.info(f"Public database host {parsed.hostname} is reachable. Using DATABASE_PUBLIC_URL.")
+            final_database_url = DATABASE_PUBLIC_URL
+        else:
+            logger.warning(f"Public database host {parsed.hostname} is not reachable.")
+
+# Check for alternative PostgreSQL environment variables if no URL is working
+if not final_database_url:
+    logger.warning("No database URL is reachable, checking for PostgreSQL environment variables...")
     pg_host = os.getenv("PGHOST")
     pg_database = os.getenv("PGDATABASE")
     pg_user = os.getenv("PGUSER")
@@ -23,12 +70,21 @@ if not DATABASE_URL:
     pg_port = os.getenv("PGPORT", "5432")
     
     if pg_host and pg_database and pg_user:
-        logger.info("Found PostgreSQL environment variables, constructing DATABASE_URL")
-        DATABASE_URL = f"postgresql://{pg_user}:{pg_password}@{pg_host}:{pg_port}/{pg_database}"
+        logger.info(f"Found PostgreSQL environment variables, checking if host {pg_host} is reachable...")
+        if is_host_reachable(pg_host, int(pg_port)):
+            logger.info(f"PostgreSQL host {pg_host} is reachable. Constructing DATABASE_URL.")
+            final_database_url = f"postgresql://{pg_user}:{pg_password}@{pg_host}:{pg_port}/{pg_database}"
+        else:
+            logger.warning(f"PostgreSQL host {pg_host} is not reachable.")
     else:
-        logger.warning("No PostgreSQL environment variables found, using SQLite as fallback")
-        DATABASE_URL = "sqlite:///./app.db"
+        logger.warning("No usable PostgreSQL environment variables found")
 
+# If still no working URL, use SQLite as fallback
+if not final_database_url:
+    logger.warning("All database connection attempts failed, using SQLite as fallback")
+    final_database_url = "sqlite:///./app.db"
+
+DATABASE_URL = final_database_url
 logger.info(f"Using database type: {DATABASE_URL.split(':')[0]}")
 
 # Print masked version of the DATABASE_URL for debugging
@@ -40,7 +96,7 @@ if "@" in masked_url:
     if len(auth_parts) > 2:
         masked_url = f"{auth_parts[0]}:****@{parts[1]}"
     
-logger.info(f"Using database URL: {masked_url}")
+logger.info(f"Final database URL: {masked_url}")
 
 # Adjust the URL if it's a Railway database URL (postgres:// -> postgresql://)
 if DATABASE_URL.startswith("postgres://"):
