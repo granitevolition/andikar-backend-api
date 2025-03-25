@@ -1,0 +1,69 @@
+version: '3.8'
+
+services:
+  # Backend API Gateway
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: andikar-backend-api
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - SECRET_KEY=${SECRET_KEY}
+      - MONGODB_URL=mongodb://mongodb:27017
+      - DATABASE_NAME=andikar
+      - HUMANIZER_API_URL=${HUMANIZER_API_URL}
+      - AI_DETECTOR_API_URL=${AI_DETECTOR_API_URL}
+      - MPESA_CONSUMER_KEY=${MPESA_CONSUMER_KEY}
+      - MPESA_CONSUMER_SECRET=${MPESA_CONSUMER_SECRET}
+      - MPESA_PASSKEY=${MPESA_PASSKEY}
+      - MPESA_SHORTCODE=${MPESA_SHORTCODE}
+      - MPESA_CALLBACK_URL=${MPESA_CALLBACK_URL}
+      - RATE_LIMIT_REQUESTS=100
+      - RATE_LIMIT_PERIOD=60
+    volumes:
+      - .:/app
+    depends_on:
+      - mongodb
+    networks:
+      - andikar-network
+
+  # MongoDB Database
+  mongodb:
+    image: mongo:latest
+    container_name: andikar-mongodb
+    restart: always
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - andikar-network
+
+  # MongoDB Express Admin Interface
+  mongo-express:
+    image: mongo-express:latest
+    container_name: andikar-mongo-express
+    restart: always
+    ports:
+      - "8081:8081"
+    environment:
+      - ME_CONFIG_MONGODB_SERVER=mongodb
+      - ME_CONFIG_MONGODB_PORT=27017
+      - ME_CONFIG_MONGODB_ENABLE_ADMIN=true
+      - ME_CONFIG_BASICAUTH_USERNAME=${MONGO_EXPRESS_USERNAME:-admin}
+      - ME_CONFIG_BASICAUTH_PASSWORD=${MONGO_EXPRESS_PASSWORD:-password}
+    depends_on:
+      - mongodb
+    networks:
+      - andikar-network
+
+volumes:
+  mongodb_data:
+
+networks:
+  andikar-network:
+    driver: bridge
