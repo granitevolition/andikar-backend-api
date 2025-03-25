@@ -1,7 +1,8 @@
 import os
 from datetime import timedelta
 
-# Simple configuration class
+# Simple configuration class without using Pydantic's BaseSettings
+# This avoids the dependency on pydantic-settings package
 class Settings:
     PROJECT_NAME = "Andikar Backend API"
     PROJECT_VERSION = "1.0.6"
