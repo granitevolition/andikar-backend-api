@@ -1,0 +1,305 @@
+{% extends "admin/base.html" %}
+
+{% block title %}API Logs - Andikar Admin{% endblock %}
+
+{% block header %}API Logs{% endblock %}
+
+{% block content %}
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <div>
+            <i class="fas fa-filter me-2"></i> Filter Logs
+        </div>
+        <div>
+            <span class="badge bg-primary">{{ filter.total }} logs found</span>
+            {% if filter.endpoint != 'all' %}
+            <a href="/admin/logs" class="btn btn-sm btn-outline-secondary ms-2">
+                <i class="fas fa-times"></i> Clear
+            </a>
+            {% endif %}
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="btn-group w-100" role="group">
+            <a href="/admin/logs" class="btn btn-outline-primary {% if filter.endpoint == 'all' %}active{% endif %}">
+                All Endpoints
+            </a>
+            {% for endpoint in endpoints %}
+            <a href="/admin/logs?endpoint={{ endpoint }}" class="btn btn-outline-primary {% if filter.endpoint == endpoint %}active{% endif %}">
+                {{ endpoint.split('/')[-1]|capitalize }}
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <i class="fas fa-file-alt me-2"></i> API Logs
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead>
+                    <tr>
+                        <th>Date & Time</th>
+                        <th>User</th>
+                        <th>Endpoint</th>
+                        <th>Request Size</th>
+                        <th>Response Size</th>
+                        <th>Time (s)</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for log in logs %}
+                    <tr>
+                        <td>{{ log.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                        <td>
+                            {% if log.user_id in users %}
+                            <a href="/admin/users/{{ log.user_id }}">
+                                {{ users[log.user_id].username }}
+                            </a>
+                            {% else %}
+                            <span class="text-muted">Unknown User</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ log.endpoint }}</td>
+                        <td>{{ log.request_size }}</td>
+                        <td>{{ log.response_size or '-' }}</td>
+                        <td>{{ "%.3f"|format(log.processing_time) if log.processing_time else '-' }}</td>
+                        <td>
+                            {% if log.status_code == 200 %}
+                            <span class="badge bg-success">{{ log.status_code }}</span>
+                            {% elif log.status_code >= 400 and log.status_code < 500 %}
+                            <span class="badge bg-warning">{{ log.status_code }}</span>
+                            {% elif log.status_code >= 500 %}
+                            <span class="badge bg-danger">{{ log.status_code }}</span>
+                            {% else %}
+                            <span class="badge bg-secondary">{{ log.status_code or '-' }}</span>
+                            {% endif %}
+                            
+                            {% if log.error %}
+                            <button type="button" class="btn btn-sm btn-outline-danger ms-1" data-bs-toggle="tooltip" title="{{ log.error }}">
+                                <i class="fas fa-exclamation-circle"></i>
+                            </button>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7" class="text-center">No logs found</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    
+    {% if pagination.total_pages > 1 %}
+    <div class="card-footer">
+        <nav aria-label="Page navigation">
+            <ul class="pagination justify-content-center mb-0">
+                {% if pagination.has_prev %}
+                <li class="page-item">
+                    <a class="page-link" href="/admin/logs?page={{ pagination.prev_page }}{% if filter.endpoint != 'all' %}&endpoint={{ filter.endpoint }}{% endif %}" aria-label="Previous">
+                        <span aria-hidden="true">&laquo;</span>
+                    </a>
+                </li>
+                {% else %}
+                <li class="page-item disabled">
+                    <a class="page-link" href="#" aria-label="Previous">
+                        <span aria-hidden="true">&laquo;</span>
+                    </a>
+                </li>
+                {% endif %}
+                
+                {% set start_page = [1, pagination.current_page - 2]|max %}
+                {% set end_page = [pagination.total_pages, pagination.current_page + 2]|min %}
+                
+                {% if start_page > 1 %}
+                <li class="page-item">
+                    <a class="page-link" href="/admin/logs?page=1{% if filter.endpoint != 'all' %}&endpoint={{ filter.endpoint }}{% endif %}">1</a>
+                </li>
+                {% if start_page > 2 %}
+                <li class="page-item disabled">
+                    <a class="page-link" href="#">...</a>
+                </li>
+                {% endif %}
+                {% endif %}
+                
+                {% for p in range(start_page, end_page + 1) %}
+                <li class="page-item {% if p == pagination.current_page %}active{% endif %}">
+                    <a class="page-link" href="/admin/logs?page={{ p }}{% if filter.endpoint != 'all' %}&endpoint={{ filter.endpoint }}{% endif %}">{{ p }}</a>
+                </li>
+                {% endfor %}
+                
+                {% if end_page < pagination.total_pages %}
+                {% if end_page < pagination.total_pages - 1 %}
+                <li class="page-item disabled">
+                    <a class="page-link" href="#">...</a>
+                </li>
+                {% endif %}
+                <li class="page-item">
+                    <a class="page-link" href="/admin/logs?page={{ pagination.total_pages }}{% if filter.endpoint != 'all' %}&endpoint={{ filter.endpoint }}{% endif %}">{{ pagination.total_pages }}</a>
+                </li>
+                {% endif %}
+                
+                {% if pagination.has_next %}
+                <li class="page-item">
+                    <a class="page-link" href="/admin/logs?page={{ pagination.next_page }}{% if filter.endpoint != 'all' %}&endpoint={{ filter.endpoint }}{% endif %}" aria-label="Next">
+                        <span aria-hidden="true">&raquo;</span>
+                    </a>
+                </li>
+                {% else %}
+                <li class="page-item disabled">
+                    <a class="page-link" href="#" aria-label="Next">
+                        <span aria-hidden="true">&raquo;</span>
+                    </a>
+                </li>
+                {% endif %}
+            </ul>
+        </nav>
+    </div>
+    {% endif %}
+</div>
+
+<!-- API Metrics Card -->
+<div class="row mt-4">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-chart-line me-2"></i> API Metrics
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-3">
+                        <div class="card bg-light">
+                            <div class="card-body text-center">
+                                <h6 class="text-muted mb-2">Total Requests</h6>
+                                <h3 class="mb-0">{{ filter.all_total }}</h3>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card bg-light">
+                            <div class="card-body text-center">
+                                <h6 class="text-muted mb-2">Success Rate</h6>
+                                <h3 class="mb-0">{{ stats.success_rate|round(1) }}%</h3>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card bg-light">
+                            <div class="card-body text-center">
+                                <h6 class="text-muted mb-2">Avg. Response Time</h6>
+                                <h3 class="mb-0">{{ stats.avg_time|round(3) }}s</h3>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="card bg-light">
+                            <div class="card-body text-center">
+                                <h6 class="text-muted mb-2">Total Data Processed</h6>
+                                <h3 class="mb-0">{{ stats.total_words }} words</h3>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="row mt-4">
+                    <div class="col-md-6">
+                        <canvas id="statusChart" height="200"></canvas>
+                    </div>
+                    <div class="col-md-6">
+                        <canvas id="endpointChart" height="200"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Initialize tooltips
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
+    var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl)
+    })
+    
+    // Status distribution chart
+    const statusCtx = document.getElementById('statusChart').getContext('2d');
+    new Chart(statusCtx, {
+        type: 'pie',
+        data: {
+            labels: ['Success (200)', 'Client Error (4xx)', 'Server Error (5xx)', 'Other'],
+            datasets: [{
+                data: [{{ stats.status_counts.success }}, {{ stats.status_counts.client_error }}, {{ stats.status_counts.server_error }}, {{ stats.status_counts.other }}],
+                backgroundColor: [
+                    'rgba(25, 135, 84, 0.7)',
+                    'rgba(255, 193, 7, 0.7)',
+                    'rgba(220, 53, 69, 0.7)',
+                    'rgba(108, 117, 125, 0.7)'
+                ],
+                borderColor: [
+                    'rgba(25, 135, 84, 1)',
+                    'rgba(255, 193, 7, 1)',
+                    'rgba(220, 53, 69, 1)',
+                    'rgba(108, 117, 125, 1)'
+                ],
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: {
+                    position: 'bottom'
+                },
+                title: {
+                    display: true,
+                    text: 'Status Code Distribution'
+                }
+            }
+        }
+    });
+    
+    // Endpoint distribution chart
+    const endpointCtx = document.getElementById('endpointChart').getContext('2d');
+    new Chart(endpointCtx, {
+        type: 'bar',
+        data: {
+            labels: {{ stats.endpoint_labels|tojson }},
+            datasets: [{
+                label: 'Request Count',
+                data: {{ stats.endpoint_values|tojson }},
+                backgroundColor: 'rgba(13, 110, 253, 0.7)',
+                borderColor: 'rgba(13, 110, 253, 1)',
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: {
+                    display: false
+                },
+                title: {
+                    display: true,
+                    text: 'Requests by Endpoint'
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        precision: 0
+                    }
+                }
+            }
+        }
+    });
+</script>
+{% endblock %}
