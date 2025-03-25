@@ -15,10 +15,6 @@ import models
 import schemas
 from main import get_current_active_user, settings
 
-# Create templates directory if it doesn't exist
-os.makedirs("templates", exist_ok=True)
-os.makedirs("static", exist_ok=True)
-
 # Create router
 admin_router = APIRouter(prefix="/admin")
 
@@ -48,27 +44,27 @@ async def admin_dashboard(
     """Admin dashboard main view"""
     
     # Get user stats
-    total_users = db.query(func.count(models.User.id)).scalar()
-    active_users = db.query(func.count(models.User.id)).filter(models.User.is_active == True).scalar()
+    total_users = db.query(func.count(models.User.id)).scalar() or 0
+    active_users = db.query(func.count(models.User.id)).filter(models.User.is_active == True).scalar() or 0
     recent_users = db.query(models.User).order_by(desc(models.User.joined_date)).limit(5).all()
     
     # Get transaction stats
-    total_transactions = db.query(func.count(models.Transaction.id)).scalar()
+    total_transactions = db.query(func.count(models.Transaction.id)).scalar() or 0
     successful_transactions = db.query(func.count(models.Transaction.id)).filter(
         models.Transaction.status == "completed"
-    ).scalar()
+    ).scalar() or 0
     total_revenue = db.query(func.sum(models.Transaction.amount)).filter(
         models.Transaction.status == "completed"
     ).scalar() or 0
     
     # Get API usage stats
-    total_requests = db.query(func.count(models.APILog.id)).scalar()
+    total_requests = db.query(func.count(models.APILog.id)).scalar() or 0
     humanize_requests = db.query(func.count(models.APILog.id)).filter(
         models.APILog.endpoint == "/api/humanize"
-    ).scalar()
+    ).scalar() or 0
     detect_requests = db.query(func.count(models.APILog.id)).filter(
         models.APILog.endpoint == "/api/detect"
-    ).scalar()
+    ).scalar() or 0
     
     # Calculate daily stats for the past 30 days
     days = 30
@@ -197,7 +193,7 @@ async def admin_users(
     
     # Get pagination
     users = users_query.order_by(desc(models.User.joined_date)).offset(offset).limit(per_page).all()
-    total_pages = (filtered_total + per_page - 1) // per_page
+    total_pages = (filtered_total + per_page - 1) // per_page if filtered_total > 0 else 1
     
     # Price plans for dropdown
     plans = db.query(models.PricingPlan).all()
@@ -335,12 +331,31 @@ async def admin_transactions(
         desc(models.Transaction.created_at)
     ).offset(offset).limit(per_page).all()
     
-    total_pages = (filtered_total + per_page - 1) // per_page
+    total_pages = (filtered_total + per_page - 1) // per_page if filtered_total > 0 else 1
     
     # Get users for reference
     user_ids = [t.user_id for t in transactions]
     users = {
-        user.id: user for user in db.query(models.User).filter(models.User.id.in_(user_ids)).all()
+        user.id: user for user in db.query(models.User).filter(models.User.id.in_(user_ids)).all() if user_ids
+    }
+
+    # Calculate summary statistics
+    total_volume = db.query(func.sum(models.Transaction.amount)).filter(
+        models.Transaction.status == "completed"
+    ).scalar() or 0
+    
+    completed_count = db.query(func.count(models.Transaction.id)).filter(
+        models.Transaction.status == "completed"
+    ).scalar() or 0
+    
+    avg_amount = 0
+    if completed_count > 0:
+        avg_amount = round(total_volume / completed_count, 2)
+
+    stats = {
+        "total_volume": total_volume,
+        "completed": completed_count,
+        "average": avg_amount
     }
     
     context = {
@@ -348,6 +363,7 @@ async def admin_transactions(
         "user": current_user,
         "transactions": transactions,
         "users": users,
+        "stats": stats,
         "pagination": {
             "current_page": page,
             "total_pages": total_pages,
@@ -390,17 +406,68 @@ async def admin_logs(
     
     # Get pagination
     logs = logs_query.order_by(desc(models.APILog.timestamp)).offset(offset).limit(per_page).all()
-    total_pages = (filtered_total + per_page - 1) // per_page
+    total_pages = (filtered_total + per_page - 1) // per_page if filtered_total > 0 else 1
     
     # Get users for reference
     user_ids = [log.user_id for log in logs]
     users = {
-        user.id: user for user in db.query(models.User).filter(models.User.id.in_(user_ids)).all()
+        user.id: user for user in db.query(models.User).filter(models.User.id.in_(user_ids)).all() if user_ids
     }
     
     # Get available endpoints for filter
     endpoints = db.query(models.APILog.endpoint).distinct().all()
-    endpoints = [e[0] for e in endpoints]
+    endpoints = [e[0] for e in endpoints] if endpoints else []
+    
+    # Calculate statistics
+    success_count = db.query(func.count(models.APILog.id)).filter(
+        models.APILog.status_code == 200
+    ).scalar() or 0
+    
+    client_error_count = db.query(func.count(models.APILog.id)).filter(
+        models.APILog.status_code >= 400,
+        models.APILog.status_code < 500
+    ).scalar() or 0
+    
+    server_error_count = db.query(func.count(models.APILog.id)).filter(
+        models.APILog.status_code >= 500
+    ).scalar() or 0
+    
+    other_count = db.query(func.count(models.APILog.id)).filter(
+        (models.APILog.status_code < 200) | 
+        ((models.APILog.status_code >= 300) & (models.APILog.status_code < 400)) |
+        (models.APILog.status_code == None)
+    ).scalar() or 0
+    
+    avg_time = db.query(func.avg(models.APILog.processing_time)).scalar() or 0
+    total_words = db.query(func.sum(models.APILog.request_size)).scalar() or 0
+    
+    success_rate = 0
+    if total_logs > 0:
+        success_rate = (success_count / total_logs) * 100
+    
+    endpoint_counts = {}
+    for endpoint_name in endpoints:
+        count = db.query(func.count(models.APILog.id)).filter(
+            models.APILog.endpoint == endpoint_name
+        ).scalar() or 0
+        endpoint_counts[endpoint_name] = count
+    
+    endpoint_labels = list(endpoint_counts.keys())
+    endpoint_values = list(endpoint_counts.values())
+    
+    stats = {
+        "success_rate": success_rate,
+        "avg_time": avg_time,
+        "total_words": total_words,
+        "status_counts": {
+            "success": success_count,
+            "client_error": client_error_count,
+            "server_error": server_error_count,
+            "other": other_count
+        },
+        "endpoint_labels": endpoint_labels,
+        "endpoint_values": endpoint_values
+    }
     
     context = {
         "request": request,
@@ -408,6 +475,7 @@ async def admin_logs(
         "logs": logs,
         "users": users,
         "endpoints": endpoints,
+        "stats": stats,
         "pagination": {
             "current_page": page,
             "total_pages": total_pages,
