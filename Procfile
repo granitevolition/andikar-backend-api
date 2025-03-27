@@ -1,1 +1,1 @@
-web: python -m app
+web: bash ./startup.sh
