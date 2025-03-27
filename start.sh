@@ -17,15 +17,23 @@ python db_diagnostic.py
 # Wait for database to be ready
 echo "Waiting for database to be ready..."
 
-# Set connection variables for export
-if [ -n "$RAILWAY_TCP_PROXY_DOMAIN" ] && [ -n "$RAILWAY_TCP_PROXY_PORT" ]; then
+# Use exact DATABASE_URL if available
+if [ -n "$DATABASE_URL" ]; then
+    echo "Using exact DATABASE_URL for database connection"
+    SQLALCHEMY_DB_URL="$DATABASE_URL"
+    # Ensure it uses postgresql:// protocol
+    SQLALCHEMY_DB_URL="${SQLALCHEMY_DB_URL/postgres:/postgresql:}"
+    export SQLALCHEMY_DATABASE_URL="$SQLALCHEMY_DB_URL"
+    
+    # Mask password for logging
+    MASKED_URL=$(echo "$SQLALCHEMY_DB_URL" | sed -E 's/(:\/\/[^:]+:)[^@]+(@)/\1****\2/')
+    echo "Connection URL set to: $MASKED_URL"
+    
+# Otherwise try to construct connection URLs
+elif [ -n "$RAILWAY_TCP_PROXY_DOMAIN" ] && [ -n "$RAILWAY_TCP_PROXY_PORT" ]; then
     echo "Using Railway TCP proxy for database connection"
     export SQLALCHEMY_DATABASE_URL="postgresql://${PGUSER}:${POSTGRES_PASSWORD}@${RAILWAY_TCP_PROXY_DOMAIN}:${RAILWAY_TCP_PROXY_PORT}/${PGDATABASE}"
     echo "Connection URL set to: postgresql://${PGUSER}:****@${RAILWAY_TCP_PROXY_DOMAIN}:${RAILWAY_TCP_PROXY_PORT}/${PGDATABASE}"
-elif [ -n "$DATABASE_URL" ]; then
-    echo "Using DATABASE_URL environment variable"
-    export SQLALCHEMY_DATABASE_URL="${DATABASE_URL}"
-    echo "Connection URL set from DATABASE_URL"
 else
     echo "Using direct internal connection"
     export SQLALCHEMY_DATABASE_URL="postgresql://${PGUSER}:${POSTGRES_PASSWORD}@${PGHOST}:${PGPORT}/${PGDATABASE}"
@@ -36,7 +44,7 @@ fi
 max_attempts=5
 attempt=1
 while [ $attempt -le $max_attempts ]; do
-    echo "Initializing database (attempt $attempt/$max_attempts)..."
+    echo "Database initialization attempt $attempt/$max_attempts..."
     if python initialize_database.py; then
         echo "✅ Database initialization successful!"
         break
