@@ -1,283 +1,73 @@
 #!/bin/bash
+
+# Andikar Backend API Startup Script
+# This script handles the startup process for the Andikar Backend API
+# It ensures proper environment setup and database initialization
+
 set -e
 
-# Print all environment variables (masked) to help debug
+echo "Starting Andikar Backend API..."
+echo ""
+
+# Print non-sensitive environment variables
 echo "Environment variables:"
-env | grep -v "_KEY\|_SECRET\|_PASSWORD\|_PASS" | sort
+printenv | grep -v PASSWORD | grep -v SECRET | grep -v KEY | sort
 
-# Try to export DATABASE_PUBLIC_URL as DATABASE_URL if needed
-if [ -z "$DATABASE_URL" ] && [ ! -z "$DATABASE_PUBLIC_URL" ]; then
-  echo "DATABASE_URL is not set but DATABASE_PUBLIC_URL is available. Using DATABASE_PUBLIC_URL instead."
-  export DATABASE_URL="$DATABASE_PUBLIC_URL"
-  echo "Set DATABASE_URL to: ${DATABASE_PUBLIC_URL//:*@/:****@}"
-fi
-
-# Check if DATABASE_URL is set
-if [ -z "$DATABASE_URL" ]; then
-  echo "WARNING: DATABASE_URL is not set!"
-  
-  # Check if we have a PostgreSQL service attached in Railway
-  if [ ! -z "$PGHOST" ] && [ ! -z "$PGDATABASE" ] && [ ! -z "$PGUSER" ]; then
-    echo "Found PostgreSQL environment variables, constructing DATABASE_URL..."
-    export DATABASE_URL="postgresql://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT:-5432}/${PGDATABASE}"
-    echo "DATABASE_URL constructed from PostgreSQL environment variables"
-  else
-    echo "No PostgreSQL environment variables found either. Using a default in-memory SQLite database for testing."
-    export DATABASE_URL="sqlite:///./test.db"
-    echo "Set DATABASE_URL to: sqlite:///./test.db"
-  fi
-fi
-
-# Simple function to extract host from URL
-get_host_from_url() {
-  local url=$1
-  if [[ $url == *"@"* ]]; then
-    echo $url | sed -e 's/.*@\([^:]*\).*/\1/'
-  else
-    echo ""
-  fi
-}
-
-# Simple function to check if host is reachable
-is_host_reachable() {
-  local host=$1
-  local port=$2
-  nc -z -w3 $host $port 2>/dev/null
-  return $?
-}
-
-# Try to check if DATABASE_URL points to a reachable host
-db_host=$(get_host_from_url "$DATABASE_URL")
-if [ ! -z "$db_host" ]; then
-  echo "Checking if host $db_host is reachable..."
-  if ! is_host_reachable $db_host 5432; then
-    echo "Host $db_host is not reachable!"
-    
-    # Try with DATABASE_PUBLIC_URL if it exists and is different
-    if [ ! -z "$DATABASE_PUBLIC_URL" ] && [ "$DATABASE_URL" != "$DATABASE_PUBLIC_URL" ]; then
-      echo "Trying with DATABASE_PUBLIC_URL instead..."
-      public_db_host=$(get_host_from_url "$DATABASE_PUBLIC_URL")
-      if [ ! -z "$public_db_host" ]; then
-        if is_host_reachable $public_db_host ${DATABASE_PUBLIC_URL##*:}; then
-          echo "Public database host $public_db_host is reachable! Using DATABASE_PUBLIC_URL."
-          export DATABASE_URL="$DATABASE_PUBLIC_URL"
-        else
-          echo "Public database host $public_db_host is also not reachable."
-        fi
-      fi
-    fi
-  else
-    echo "Host $db_host is reachable."
-  fi
-fi
-
-# Function to check if database is ready
-function check_db() {
-  echo "Checking database connection..."
-  
-  # First, determine what type of database we're using
-  if [[ "$DATABASE_URL" == sqlite* ]]; then
-    echo "Using SQLite database, no connection check needed"
-    return 0
-  fi
-  
-  python -c "
-import os
-import sys
-import time
-import socket
-import urllib.parse
-import sqlalchemy
-from sqlalchemy import create_engine, text
-
-# Get database URL from environment variable
-db_url = os.getenv('DATABASE_URL', '')
-if not db_url:
-    print('DATABASE_URL is not set')
-    sys.exit(1)
-
-try:
-    # Handle both postgres:// and postgresql:// formats
-    if db_url.startswith('postgres://'):
-        db_url = db_url.replace('postgres://', 'postgresql://', 1)
-    
-    # Parse the connection string
-    parsed = urllib.parse.urlparse(db_url)
-    
-    if parsed.scheme not in ['postgresql', 'postgres']:
-        print(f'Using {parsed.scheme} database, skipping connection check')
-        sys.exit(0)
+# Wait for PostgreSQL to be ready (if using Railway PostgreSQL)
+if [[ -n "$DATABASE_URL" || -n "$DATABASE_PUBLIC_URL" ]]; then
+    echo "Checking database connection..."
     
     # Extract host and port
-    host = parsed.hostname
-    port = parsed.port or 5432
-    
-    # First try a basic socket connection to see if the host is reachable
-    print(f'Checking if host {host} is reachable on port {port}...')
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.settimeout(3)
-    s.connect((host, port))
-    s.close()
-    
-    # Host is reachable, now try a proper database connection
-    print('Host is reachable, attempting database connection...')
-    
-    # Try to import psycopg2, if it fails, skip the check
-    try:
-        import psycopg2
-    except ImportError:
-        print('psycopg2 not installed, skipping database connection check')
-        sys.exit(0)
-    
-    # Extract connection parameters
-    user = parsed.username
-    password = parsed.password
-    dbname = parsed.path[1:]  # Remove leading '/'
-    
-    # Try a public DATABASE_URL if available and different from the current one
-    try:
-        # Create SQLAlchemy engine and test connection
-        engine = create_engine(db_url, connect_args={'connect_timeout': 5})
-        with engine.connect() as conn:
-            # Use text() for SQL execution
-            conn.execute(text('SELECT 1'))
-        print('Database connection successful')
-        sys.exit(0)
-    except Exception as e1:
-        public_url = os.getenv('DATABASE_PUBLIC_URL')
-        if public_url and public_url != db_url:
-            print(f'Primary connection failed: {str(e1)}')
-            print('Trying with DATABASE_PUBLIC_URL...')
-            try:
-                if public_url.startswith('postgres://'):
-                    public_url = public_url.replace('postgres://', 'postgresql://', 1)
-                
-                # Create engine and test with the public URL
-                engine = create_engine(public_url, connect_args={'connect_timeout': 5})
-                with engine.connect() as conn:
-                    # Use text() for SQL execution
-                    conn.execute(text('SELECT 1'))
-                print('Database connection successful using DATABASE_PUBLIC_URL')
-                # Set this as the primary URL for future use
-                os.environ['DATABASE_URL'] = public_url
-                sys.exit(0)
-            except Exception as e2:
-                print(f'Public connection also failed: {str(e2)}')
-                sys.exit(1)
-        else:
-            print(f'Database connection failed: {str(e1)}')
-            sys.exit(1)
-except Exception as e:
-    print(f'Database connection failed: {str(e)}')
-    sys.exit(1)
-"
-}
-
-# Wait for the database to be ready
-echo "Waiting for database to be ready..."
-max_retries=10
-retry_count=0
-
-until check_db || [ $retry_count -eq $max_retries ]; do
-  echo "Database not ready yet. Waiting..."
-  sleep 3
-  retry_count=$((retry_count+1))
-done
-
-if [ $retry_count -eq $max_retries ]; then
-  echo "WARNING: Could not verify database connection after $max_retries attempts"
-  echo "Checking if we have DATABASE_PUBLIC_URL to try instead..."
-  
-  if [ ! -z "$DATABASE_PUBLIC_URL" ] && [ "$DATABASE_URL" != "$DATABASE_PUBLIC_URL" ]; then
-    echo "Trying with DATABASE_PUBLIC_URL instead..."
-    export DATABASE_URL="$DATABASE_PUBLIC_URL"
-    
-    # Reset retry counter and try again with public URL
-    retry_count=0
-    until check_db || [ $retry_count -eq $max_retries ]; do
-      echo "Database not ready yet (using public URL). Waiting..."
-      sleep 3
-      retry_count=$((retry_count+1))
-    done
-    
-    if [ $retry_count -eq $max_retries ]; then
-      echo "WARNING: Could not verify database connection with public URL either"
-      echo "Will attempt to continue with SQLite fallback..."
-      export DATABASE_URL="sqlite:///./fallback.db"
+    if [[ -n "$DATABASE_URL" ]]; then
+        DB_URL="$DATABASE_URL"
+    else
+        DB_URL="$DATABASE_PUBLIC_URL"
     fi
-  else
-    echo "No alternative DATABASE_PUBLIC_URL available or already tried"
-    echo "Will attempt to continue with SQLite fallback..."
-    export DATABASE_URL="sqlite:///./fallback.db"
-  fi
+    
+    # Parse the URL to extract host and port
+    if [[ "$DB_URL" =~ .*@([^:]+):([0-9]+)/([^?]+).* ]]; then
+        DB_HOST="${BASH_REMATCH[1]}"
+        DB_PORT="${BASH_REMATCH[2]}"
+        DB_NAME="${BASH_REMATCH[3]}"
+        
+        echo "Database details:"
+        echo "  - Host: $DB_HOST"
+        echo "  - Port: $DB_PORT"
+        echo "  - Database: $DB_NAME"
+        
+        # Try to connect using timeout to avoid hanging
+        echo "Waiting for database to be ready..."
+        
+        MAX_RETRIES=5
+        RETRY_COUNT=0
+        BACKOFF_TIME=2
+        
+        while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            if nc -z -w 5 "$DB_HOST" "$DB_PORT"; then
+                echo "Database is ready!"
+                break
+            else
+                RETRY_COUNT=$((RETRY_COUNT+1))
+                if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+                    echo "Warning: Could not connect to database after $MAX_RETRIES attempts."
+                    echo "Proceeding with application startup, but database features may not work."
+                    break
+                fi
+                
+                WAIT_TIME=$((BACKOFF_TIME ** RETRY_COUNT))
+                echo "Database not ready yet. Retrying in $WAIT_TIME seconds... (Attempt $RETRY_COUNT/$MAX_RETRIES)"
+                sleep $WAIT_TIME
+            fi
+        done
+    else
+        echo "Warning: Could not parse database URL. Will continue without database connection check."
+    fi
 fi
 
-# Check if tables already exist to avoid migration errors
-echo "Checking if database tables already exist..."
-python -c "
-import os
-import sys
-import sqlalchemy
-from sqlalchemy import create_engine, text, inspect
+# Create static and templates directories if they don't exist
+mkdir -p templates
+mkdir -p static
 
-# Get database URL from environment variable
-db_url = os.getenv('DATABASE_URL', '')
-if not db_url:
-    print('DATABASE_URL is not set')
-    sys.exit(1)
-
-try:
-    # Handle both postgres:// and postgresql:// formats
-    if db_url.startswith('postgres://'):
-        db_url = db_url.replace('postgres://', 'postgresql://', 1)
-    
-    # Create SQLAlchemy engine
-    engine = create_engine(db_url)
-    
-    # Check if 'users' table exists (as a proxy for all tables)
-    inspector = inspect(engine)
-    tables_exist = 'users' in inspector.get_table_names()
-    
-    if tables_exist:
-        print('Database tables already exist, skipping migrations')
-        # Create a flag file to indicate migrations should be skipped
-        with open('.skip_migrations', 'w') as f:
-            f.write('1')
-        sys.exit(0)
-    else:
-        print('Database tables do not exist, will run migrations')
-        # Make sure the flag file doesn't exist
-        if os.path.exists('.skip_migrations'):
-            os.remove('.skip_migrations')
-        sys.exit(0)
-except Exception as e:
-    print(f'Error checking database tables: {str(e)}')
-    # In case of error, we'll try to run migrations anyway
-    sys.exit(0)
-"
-
-# Run database migrations only if needed
-echo "Running database migrations..."
-if [[ "$DATABASE_URL" == sqlite* ]]; then
-  echo "Creating SQLite database..."
-  # For SQLite, let's make sure the directory exists
-  mkdir -p $(dirname "${DATABASE_URL#sqlite:///}")
-fi
-
-# Check if we should skip migrations
-if [ -f .skip_migrations ]; then
-  echo "Skipping migrations as tables already exist"
-  rm -f .skip_migrations
-else
-  # Run migrations with error handling
-  if alembic upgrade head; then
-    echo "Database migrations completed successfully"
-  else
-    echo "WARNING: Database migrations failed, but will attempt to continue..."
-  fi
-fi
-
-# Set the port from environment or default to 8000
-PORT=${PORT:-8000}
-echo "Starting application on port $PORT..."
-uvicorn main:app --host 0.0.0.0 --port $PORT
+# Start the application
+echo "Starting application on port ${PORT:-8080}..."
+exec python -m app
