@@ -36,41 +36,27 @@ def check_host_connectivity(host, port, timeout=3):
 def get_database_url():
     """
     Determine the most appropriate database URL to use.
-    Prioritizes the exact DATABASE_URL from the environment.
+    Only tries to use proxy connection since internal hostname doesn't resolve.
     """
-    # Priority 1: Use exact DATABASE_URL from environment (most reliable)
+    # Priority 1: Use public DATABASE_URL from environment (most reliable)
     database_url = os.getenv("DATABASE_URL")
     if database_url:
         # Ensure it's using postgresql:// protocol
         if database_url.startswith("postgres:"):
             database_url = database_url.replace("postgres:", "postgresql:")
-        logger.info("Using exact DATABASE_URL from environment variable")
+        logger.info("Using DATABASE_URL from environment variable")
         return database_url
     
-    # Priority 2: Construct from TCP proxy details
-    proxy_domain = os.getenv("RAILWAY_TCP_PROXY_DOMAIN")
-    proxy_port = os.getenv("RAILWAY_TCP_PROXY_PORT")
+    # Priority 2: Build proxy connection URL from components
     pg_user = os.getenv("PGUSER", "postgres")
-    pg_password = os.getenv("POSTGRES_PASSWORD")
+    pg_password = os.getenv("POSTGRES_PASSWORD", "ztJggTeesPJYVMHRWuGVbnUinMKwCWyI")
     pg_db = os.getenv("PGDATABASE", "railway")
+    proxy_domain = os.getenv("RAILWAY_TCP_PROXY_DOMAIN", "ballast.proxy.rlwy.net")
+    proxy_port = os.getenv("RAILWAY_TCP_PROXY_PORT", "11148")
     
-    if proxy_domain and proxy_port and pg_password:
-        proxy_conn_string = f"postgresql://{pg_user}:{pg_password}@{proxy_domain}:{proxy_port}/{pg_db}"
-        logger.info(f"Using TCP proxy connection: postgresql://{pg_user}:****@{proxy_domain}:{proxy_port}/{pg_db}")
-        return proxy_conn_string
-    
-    # Priority 3: Try direct internal connection
-    pg_host = os.getenv("PGHOST", "postgres.railway.internal")
-    pg_port = os.getenv("PGPORT", "5432")
-    
-    if pg_host and pg_port and pg_password:
-        direct_conn_string = f"postgresql://{pg_user}:{pg_password}@{pg_host}:{pg_port}/{pg_db}"
-        logger.info(f"Using direct internal connection: postgresql://{pg_user}:****@{pg_host}:{pg_port}/{pg_db}")
-        return direct_conn_string
-    
-    # If all else fails, use SQLite as fallback (development only)
-    logger.warning("No PostgreSQL connection configuration found, using SQLite fallback")
-    return "sqlite:///./andikar.db"
+    proxy_conn_string = f"postgresql://{pg_user}:{pg_password}@{proxy_domain}:{proxy_port}/{pg_db}"
+    logger.info(f"Using TCP proxy connection: postgresql://{pg_user}:****@{proxy_domain}:{proxy_port}/{pg_db}")
+    return proxy_conn_string
 
 # Get the appropriate database URL
 SQLALCHEMY_DATABASE_URL = get_database_url()
