@@ -1,1 +1,1 @@
-web: bash ./minimal_start.sh
+web: python status_server.py
