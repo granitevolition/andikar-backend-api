@@ -5,7 +5,7 @@
     "buildCommand": "chmod +x *.py"
   },
   "deploy": {
-    "startCommand": "python admin_test.py",
+    "startCommand": "python minimal_app.py",
     "healthcheckPath": "/status",
     "healthcheckTimeout": 60,
     "healthcheckInterval": 15,
