@@ -9,37 +9,26 @@ import psycopg2
 from psycopg2 import sql
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 
-# Hard-coded credentials from Railway
+# UPDATED CREDENTIALS FROM USER
 DB_USER = "postgres"
-DB_PASSWORD = "eLsHIpQoaRgtqGUMXAGzDXcIKLsIsRSf"
+DB_PASSWORD = "ztJggTeesPJYVMHRWuGVbnUinMKwCWyI"
 DB_NAME = "railway"
 DB_PORT = "5432"
+DB_HOST = "postgres.railway.internal"
+DB_PROXY_HOST = "ballast.proxy.rlwy.net"
+DB_PROXY_PORT = "11148"
 
-# Possible hosts to try
-HOSTS = [
-    "postgres.railway.internal",  # Railway internal networking
-    os.getenv("RAILWAY_PRIVATE_DOMAIN", "web.railway.internal"),  # Private domain
-    os.getenv("RAILWAY_TCP_PROXY_DOMAIN", "proxy.railway.app")  # Public proxy
-]
+# Connection strings
+DIRECT_CONN_STRING = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+PROXY_CONN_STRING = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_PROXY_HOST}:{DB_PROXY_PORT}/{DB_NAME}"
 
-# Port to use for public proxy
-PROXY_PORT = os.getenv("RAILWAY_TCP_PROXY_PORT", "5432")
-
-def try_connect(host, port, print_details=True):
-    """Try to connect to PostgreSQL using the given host and port."""
+def try_connect(connection_string, name="Database", print_details=True):
+    """Try to connect to PostgreSQL using the given connection string."""
     try:
-        print(f"Attempting to connect to PostgreSQL at {host}:{port}...")
+        print(f"Attempting to connect to {name} with: {connection_string.split('@')[0]}@...")
         
         # Create connection
-        conn = psycopg2.connect(
-            dbname=DB_NAME,
-            user=DB_USER,
-            password=DB_PASSWORD,
-            host=host,
-            port=port,
-            connect_timeout=10
-        )
-        
+        conn = psycopg2.connect(connection_string, connect_timeout=10)
         conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
         
         # Test connection
@@ -50,11 +39,10 @@ def try_connect(host, port, print_details=True):
             
             # Print database details if requested
             if print_details:
-                cursor.execute("SELECT current_database(), current_user, inet_server_addr();")
+                cursor.execute("SELECT current_database(), current_user;")
                 details = cursor.fetchone()
                 print(f"Database: {details[0]}")
                 print(f"User: {details[1]}")
-                print(f"Server Address: {details[2]}")
                 
                 # Get list of schemas
                 cursor.execute("SELECT schema_name FROM information_schema.schemata;")
@@ -238,19 +226,18 @@ def main():
     print("This script attempts to connect to PostgreSQL and create tables")
     print()
     
-    # Try to connect using various hosts
-    connection = None
+    # Try different connection methods in order of preference
+    connections_to_try = [
+        (DIRECT_CONN_STRING, "Direct connection"),
+        (PROXY_CONN_STRING, "Proxy connection")
+    ]
     
-    # Try internal hosts first
-    for host in HOSTS[:-1]:
-        connection = try_connect(host, DB_PORT)
+    connection = None
+    for conn_string, name in connections_to_try:
+        connection = try_connect(conn_string, name)
         if connection:
             break
-        print(f"Could not connect to {host}, trying next host...")
-    
-    # If internal hosts fail, try proxy with custom port
-    if not connection and HOSTS[-1]:
-        connection = try_connect(HOSTS[-1], PROXY_PORT)
+        print(f"Could not connect using {name}, trying next method...")
     
     # If all attempts fail, exit
     if not connection:
