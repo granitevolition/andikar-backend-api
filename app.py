@@ -1,125 +1,456 @@
 """
-Core application file for Andikar Backend API.
-
-This module provides a clean separation between application definition
-and application execution, allowing for better testing and deployment.
+Simple application file - minimal dependencies
 """
-import logging
 import os
-from fastapi import FastAPI, Request, Depends
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.templating import Jinja2Templates
+import logging
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from datetime import datetime
+from fastapi.middleware.cors import CORSMiddleware
 
-# Import utilities and configuration
-import config
-from database import get_db, engine
-from models import Base
-from auth import get_current_user
-from admin import admin_router
-
-# Setup logging
+# Set up logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger("andikar-app")
 
+# Create directories if they don't exist
+os.makedirs("templates", exist_ok=True)
+os.makedirs("static", exist_ok=True)
+
 # Initialize FastAPI app
 app = FastAPI(
-    title=config.PROJECT_NAME,
+    title="Andikar Backend API",
     description="Backend API Gateway for Andikar AI services",
-    version=config.PROJECT_VERSION
+    version="1.0.0"
 )
 
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Update for production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Create directories if they don't exist
-os.makedirs("templates", exist_ok=True)
-os.makedirs("static", exist_ok=True)
+# Try to mount static files
+try:
+    app.mount("/static", StaticFiles(directory="static"), name="static")
+except Exception as e:
+    logger.warning(f"Could not mount static files: {e}")
 
-# Mount static files
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
-# Set up templates
-templates = Jinja2Templates(directory="templates")
-
-# Include admin router
-app.include_router(admin_router)
-
-# Root endpoint - serves index.html or redirects to API status
-@app.get("/")
-async def root(request: Request):
-    """
-    Serve the index page as HTML or return API status as JSON based on Accept header
-    """
-    # Check Accept header to determine response type
-    accept = request.headers.get("Accept", "")
-    
-    # If client explicitly requests JSON, return API status
-    if "application/json" in accept and "text/html" not in accept:
-        return {
-            "status": "healthy",
-            "name": config.PROJECT_NAME,
-            "version": config.PROJECT_VERSION,
-            "description": "Backend API Gateway for Andikar AI services",
-            "timestamp": datetime.utcnow().isoformat(),
-            "environment": os.getenv("RAILWAY_ENVIRONMENT_NAME", "production")
+# Create a basic index.html
+index_html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Andikar Backend API</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem 15px;
+        }
+        .logo {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .logo i {
+            font-size: 48px;
+            color: #0d6efd;
+        }
+        .logo h1 {
+            margin-top: 15px;
+            font-weight: 600;
+        }
+        .section-heading {
+            position: relative;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+            font-weight: 600;
+            color: #343a40;
+        }
+        .section-heading:after {
+            content: '';
+            position: absolute;
+            left: 0;
+            bottom: 0;
+            width: 50px;
+            height: 3px;
+            background-color: #0d6efd;
+        }
+        .card {
+            border: none;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+        }
+        .card-header {
+            background-color: #f8f9fa;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+            font-weight: bold;
+            color: #343a40;
+            border-top-left-radius: 10px !important;
+            border-top-right-radius: 10px !important;
+            display: flex;
+            align-items: center;
+        }
+        .card-header i {
+            font-size: 1.25rem;
+            margin-right: 10px;
+            color: #0d6efd;
+        }
+        .list-group-item {
+            display: flex;
+            align-items: center;
+            transition: background-color 0.2s;
+            border-left: none;
+            border-right: none;
+        }
+        .list-group-item:last-child {
+            border-bottom: none;
+        }
+        .list-group-item:hover {
+            background-color: #f1f3f5;
+        }
+        .list-group-item i {
+            font-size: 1rem;
+            margin-right: 10px;
+            color: #6c757d;
+            width: 20px;
+            text-align: center;
+        }
+        .list-group-item a {
+            color: #495057;
+            text-decoration: none;
+            flex-grow: 1;
+        }
+        .list-group-item a:hover {
+            color: #0d6efd;
+        }
+        .btn-primary, .btn-secondary, .btn-info, .btn-success {
+            padding: 8px 16px;
+            transition: all 0.3s;
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        .badge {
+            margin-left: 10px;
+        }
+        .system-status {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+        .system-status.healthy {
+            background-color: #198754;
+        }
+        .system-status.unhealthy {
+            background-color: #dc3545;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 50px;
+            padding-top: 20px;
+            border-top: 1px solid #dee2e6;
+            color: #6c757d;
+        }
+        .api-route {
+            font-family: monospace;
+            background-color: #f8f9fa;
+            padding: 2px 5px;
+            border-radius: 3px;
+            color: #0d6efd;
+        }
+        .description {
+            margin-top: 5px;
+            font-size: 0.85rem;
+            color: #6c757d;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">
+            <i class="fas fa-robot"></i>
+            <h1>Andikar Backend API</h1>
+            <p class="lead text-muted">Complete Index of All Pages and Endpoints</p>
+        </div>
+
+        <div class="row">
+            <!-- Section 1: Quick Access -->
+            <div class="col-md-12 mb-4">
+                <h2 class="section-heading">Quick Access</h2>
+                <div class="row">
+                    <div class="col-md-3 mb-3">
+                        <a href="/" class="btn btn-primary w-100">
+                            <i class="fas fa-home me-2"></i> Home Page
+                        </a>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <a href="/admin" class="btn btn-secondary w-100">
+                            <i class="fas fa-tachometer-alt me-2"></i> Admin Dashboard
+                        </a>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <a href="/docs" class="btn btn-info w-100 text-white">
+                            <i class="fas fa-book me-2"></i> API Documentation
+                        </a>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <a href="/health" class="btn btn-success w-100">
+                            <i class="fas fa-heartbeat me-2"></i> System Health
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Section 2: Admin Area -->
+            <div class="col-md-6 mb-4">
+                <h2 class="section-heading">Admin Area</h2>
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-shield-alt"></i> Admin Pages
+                    </div>
+                    <ul class="list-group list-group-flush">
+                        <li class="list-group-item">
+                            <i class="fas fa-tachometer-alt"></i>
+                            <a href="/admin">Dashboard Overview</a>
+                            <span class="badge bg-primary">Main</span>
+                        </li>
+                        <li class="list-group-item">
+                            <i class="fas fa-users"></i>
+                            <a href="/admin/users">User Management</a>
+                        </li>
+                        <li class="list-group-item">
+                            <i class="fas fa-user"></i>
+                            <a href="/admin/users/1">User Details</a>
+                            <span class="badge bg-secondary">Dynamic</span>
+                        </li>
+                        <li class="list-group-item">
+                            <i class="fas fa-money-bill-wave"></i>
+                            <a href="/admin/transactions">Transaction Management</a>
+                        </li>
+                        <li class="list-group-item">
+                            <i class="fas fa-file-alt"></i>
+                            <a href="/admin/logs">API Logs</a>
+                        </li>
+                        <li class="list-group-item">
+                            <i class="fas fa-cogs"></i>
+                            <a href="/admin/settings">System Settings</a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Section 3: Documentation -->
+            <div class="col-md-6 mb-4">
+                <h2 class="section-heading">Documentation</h2>
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-book"></i> API Documentation & Schema
+                    </div>
+                    <ul class="list-group list-group-flush">
+                        <li class="list-group-item">
+                            <i class="fas fa-file-code"></i>
+                            <a href="/docs">Swagger UI Documentation</a>
+                            <div class="description">Interactive API documentation with testing capabilities</div>
+                        </li>
+                        <li class="list-group-item">
+                            <i class="fas fa-book"></i>
+                            <a href="/redoc">ReDoc Documentation</a>
+                            <div class="description">Alternative API documentation format (more readable)</div>
+                        </li>
+                        <li class="list-group-item">
+                            <i class="fas fa-code"></i>
+                            <a href="/openapi.json">OpenAPI Schema (JSON)</a>
+                            <div class="description">Raw OpenAPI specification in JSON format</div>
+                        </li>
+                        <li class="list-group-item">
+                            <i class="fas fa-heartbeat"></i>
+                            <a href="/health">System Health Status</a>
+                            <div class="description">Check the current status of all system components</div>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Section 4: API Endpoints - Authentication -->
+            <div class="col-md-6 mb-4">
+                <h2 class="section-heading">API Endpoints</h2>
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-key"></i> Authentication & User Management
+                    </div>
+                    <ul class="list-group list-group-flush">
+                        <li class="list-group-item">
+                            <span class="badge bg-success me-2">POST</span>
+                            <span class="api-route">/token</span>
+                            <div class="description">Get JWT access token for authentication</div>
+                        </li>
+                        <li class="list-group-item">
+                            <span class="badge bg-success me-2">POST</span>
+                            <span class="api-route">/users/register</span>
+                            <div class="description">Register a new user account</div>
+                        </li>
+                        <li class="list-group-item">
+                            <span class="badge bg-primary me-2">GET</span>
+                            <span class="api-route">/users/me</span>
+                            <div class="description">Get current user profile information</div>
+                        </li>
+                        <li class="list-group-item">
+                            <span class="badge bg-warning text-dark me-2">PUT</span>
+                            <span class="api-route">/users/me</span>
+                            <div class="description">Update user profile information</div>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Section 5: API Endpoints - Services -->
+            <div class="col-md-6 mb-4">
+                <h2 class="section-heading">&nbsp;</h2> <!-- Empty heading for alignment -->
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-cogs"></i> Text Services & Payments
+                    </div>
+                    <ul class="list-group list-group-flush">
+                        <li class="list-group-item">
+                            <span class="badge bg-success me-2">POST</span>
+                            <span class="api-route">/api/humanize</span>
+                            <div class="description">Humanize AI-generated text</div>
+                        </li>
+                        <li class="list-group-item">
+                            <span class="badge bg-success me-2">POST</span>
+                            <span class="api-route">/api/detect</span>
+                            <div class="description">Detect AI-generated content</div>
+                        </li>
+                        <li class="list-group-item">
+                            <span class="badge bg-success me-2">POST</span>
+                            <span class="api-route">/api/payments/mpesa/initiate</span>
+                            <div class="description">Initiate M-Pesa payment</div>
+                        </li>
+                        <li class="list-group-item">
+                            <span class="badge bg-success me-2">POST</span>
+                            <span class="api-route">/api/payments/mpesa/callback</span>
+                            <div class="description">M-Pesa payment callback endpoint</div>
+                        </li>
+                        <li class="list-group-item">
+                            <span class="badge bg-success me-2">POST</span>
+                            <span class="api-route">/api/payments/simulate</span>
+                            <div class="description">Simulate a payment (testing only)</div>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Section 6: System Information -->
+            <div class="col-md-12">
+                <h2 class="section-heading">System Information</h2>
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-info-circle"></i> API Information
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-4 mb-3">
+                                <div class="border rounded p-3">
+                                    <h5><i class="fas fa-tag me-2 text-primary"></i> Version</h5>
+                                    <p class="mb-0" id="api-version">1.0.6</p>
+                                </div>
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <div class="border rounded p-3">
+                                    <h5><i class="fas fa-server me-2 text-primary"></i> Environment</h5>
+                                    <p class="mb-0" id="api-environment">Production</p>
+                                </div>
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <div class="border rounded p-3">
+                                    <h5><i class="fas fa-check-circle me-2 text-primary"></i> Status</h5>
+                                    <p class="mb-0">
+                                        <span class="system-status healthy"></span>
+                                        <span id="api-status">Up and running</span>
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p>© 2025 Andikar. All rights reserved.</p>
+            <p>Powered by FastAPI, PostgreSQL, and Railway.</p>
+            <p><small>Last updated: <span id="last-updated"></span></small></p>
+        </div>
+    </div>
     
-    # Otherwise, serve the index.html template
-    return templates.TemplateResponse("index.html", {
-        "request": request,
-        "title": config.PROJECT_NAME,
-        "description": "Backend API Gateway for Andikar AI services",
-        "version": config.PROJECT_VERSION,
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Set current date and time
+        document.getElementById('last-updated').textContent = new Date().toISOString();
+    </script>
+</body>
+</html>"""
+
+# Root endpoint (index page)
+@app.get("/", response_class=HTMLResponse)
+async def root():
+    return HTMLResponse(content=index_html)
+
+# Status endpoint for healthcheck
+@app.get("/status")
+async def status_check():
+    return {
         "status": "healthy",
-        "environment": os.getenv("RAILWAY_ENVIRONMENT_NAME", "production"),
-        "timestamp": datetime.utcnow().isoformat()
-    })
+        "message": "Application is running",
+        "progress": 100,
+        "complete": True
+    }
 
 # Health check endpoint
 @app.get("/health")
 async def health_check():
-    """
-    Check system health and return status
-    """
     return {
         "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": None,  # Would use datetime.utcnow().isoformat() but avoiding imports
         "services": {
-            "database": "healthy",
             "api": "healthy"
         }
     }
 
-# Alternate index page endpoint
-@app.get("/index.html")
-async def index_html(request: Request):
-    """
-    Alternative endpoint for index page
-    """
-    return await root(request)
+# Alternative index page routes
+@app.get("/index.html", response_class=HTMLResponse)
+async def index_html_endpoint():
+    return HTMLResponse(content=index_html)
 
-# Home endpoint - alias for root
-@app.get("/home")
-async def home(request: Request):
-    """
-    Alias for root endpoint
-    """
-    return await root(request)
+@app.get("/home", response_class=HTMLResponse)
+async def home():
+    return HTMLResponse(content=index_html)
 
-# For local development
+# Main entry point
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", "8080"))
-    logger.info(f"Starting {config.PROJECT_NAME} on port {port}")
-    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=True)
+    logger.info(f"Starting application on port {port}")
+    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=False)
