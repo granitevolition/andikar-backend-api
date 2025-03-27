@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Andikar Backend API</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .container {
+            max-width: 800px;
+            margin: 50px auto;
+        }
+        .logo {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .logo i {
+            font-size: 48px;
+            color: #0d6efd;
+        }
+        .card {
+            border: none;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+            transition: transform 0.3s;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+        }
+        .card-header {
+            background-color: #fff;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+            font-weight: bold;
+        }
+        .list-group-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .btn-primary {
+            background-color: #0d6efd;
+            border: none;
+            padding: 10px 20px;
+            transition: all 0.3s;
+        }
+        .btn-primary:hover {
+            background-color: #0b5ed7;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        .system-status {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+        .system-status.healthy {
+            background-color: #198754;
+        }
+        .system-status.unhealthy {
+            background-color: #dc3545;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #dee2e6;
+            color: #6c757d;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">
+            <i class="fas fa-robot"></i>
+            <h1>Andikar Backend API</h1>
+            <p class="text-muted">Backend API Gateway for Andikar AI services</p>
+        </div>
+        
+        <div class="row">
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-link me-2"></i> Quick Links
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <a href="/admin" class="btn btn-primary w-100">
+                                    <i class="fas fa-tachometer-alt me-2"></i> Admin Dashboard
+                                </a>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <a href="/docs" class="btn btn-secondary w-100">
+                                    <i class="fas fa-book me-2"></i> API Documentation
+                                </a>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <a href="/health" class="btn btn-info w-100 text-white">
+                                    <i class="fas fa-heartbeat me-2"></i> Health Check
+                                </a>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <a href="/redoc" class="btn btn-success w-100">
+                                    <i class="fas fa-file-alt me-2"></i> ReDoc Documentation
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-info-circle me-2"></i> API Information
+                    </div>
+                    <div class="card-body">
+                        <div class="list-group">
+                            <div class="list-group-item">
+                                <strong>Version</strong>
+                                <span id="api-version">1.0.6</span>
+                            </div>
+                            <div class="list-group-item">
+                                <strong>Environment</strong>
+                                <span id="api-environment">Production</span>
+                            </div>
+                            <div class="list-group-item">
+                                <strong>Status</strong>
+                                <span>
+                                    <span class="system-status healthy"></span>
+                                    <span id="api-status">Up and running</span>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-server me-2"></i> Available Endpoints
+                    </div>
+                    <div class="card-body">
+                        <div class="list-group">
+                            <div class="list-group-item">
+                                <strong>Authentication</strong>
+                                <code>/token</code>
+                            </div>
+                            <div class="list-group-item">
+                                <strong>User Management</strong>
+                                <code>/users/register</code>, <code>/users/me</code>
+                            </div>
+                            <div class="list-group-item">
+                                <strong>Text Services</strong>
+                                <code>/api/humanize</code>, <code>/api/detect</code>
+                            </div>
+                            <div class="list-group-item">
+                                <strong>Payment Processing</strong>
+                                <code>/api/payments/mpesa/initiate</code>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p>© 2025 Andikar. All rights reserved.</p>
+            <p>Powered by FastAPI, PostgreSQL, and Railway.</p>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Fetch API information
+        fetch('/')
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('api-version').textContent = data.version;
+                document.getElementById('api-environment').textContent = data.environment?.RAILWAY_ENVIRONMENT_NAME || 'Production';
+                document.getElementById('api-status').textContent = data.status;
+            })
+            .catch(error => console.error('Error fetching API info:', error));
+    </script>
+</body>
+</html>
