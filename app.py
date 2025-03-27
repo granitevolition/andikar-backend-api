@@ -1,3 +1,4 @@
+# Re-add the current content and add new admin routes
 """
 Core application file for Andikar Backend API.
 This module provides a backend API gateway for the Andikar AI ecosystem.
@@ -1133,6 +1134,314 @@ async def index_html(request: Request):
 @app.get("/home", response_class=HTMLResponse)
 async def home(request: Request):
     return await root(request)
+
+# Add Admin routes
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_dashboard(request: Request, current_user: models.User = Depends(get_admin_user)):
+    """
+    Admin dashboard index page
+    """
+    if not templates:
+        raise HTTPException(status_code=500, detail="Templates not configured")
+    
+    # Render the admin dashboard template
+    return templates.TemplateResponse("admin/dashboard.html", {
+        "request": request,
+        "title": "Admin Dashboard",
+        "user": current_user,
+        "active_page": "dashboard"
+    })
+
+@app.get("/admin/users", response_class=HTMLResponse)
+async def admin_users(
+    request: Request, 
+    page: int = 1,
+    current_user: models.User = Depends(get_admin_user),
+    db: Session = Depends(get_db)
+):
+    """
+    User management page
+    """
+    if not templates:
+        raise HTTPException(status_code=500, detail="Templates not configured")
+    
+    # Get users with pagination
+    page_size = 10
+    offset = (page - 1) * page_size
+    
+    users = db.query(models.User).offset(offset).limit(page_size).all()
+    total_users = db.query(func.count(models.User.id)).scalar() or 0
+    total_pages = (total_users + page_size - 1) // page_size
+    
+    return templates.TemplateResponse("admin/users.html", {
+        "request": request,
+        "title": "User Management",
+        "users": users,
+        "page": page,
+        "total_pages": total_pages,
+        "total_users": total_users,
+        "active_page": "users",
+        "user": current_user
+    })
+
+@app.get("/admin/user/{user_id}", response_class=HTMLResponse)
+async def admin_user_detail(
+    user_id: str,
+    request: Request,
+    current_user: models.User = Depends(get_admin_user),
+    db: Session = Depends(get_db)
+):
+    """
+    User detail page
+    """
+    if not templates:
+        raise HTTPException(status_code=500, detail="Templates not configured")
+    
+    # Get user details
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Get user's plan
+    plan = db.query(models.PricingPlan).filter(models.PricingPlan.id == user.plan_id).first()
+    
+    # Get user's transactions
+    transactions = db.query(models.Transaction).filter(
+        models.Transaction.user_id == user_id
+    ).order_by(desc(models.Transaction.created_at)).all()
+    
+    # Get usage stats
+    usage_stats = db.query(models.UsageStat).filter(
+        models.UsageStat.user_id == user_id
+    ).order_by(
+        desc(models.UsageStat.year),
+        desc(models.UsageStat.month),
+        desc(models.UsageStat.day)
+    ).limit(30).all()
+    
+    return templates.TemplateResponse("admin/user_detail.html", {
+        "request": request,
+        "title": f"User: {user.username}",
+        "selected_user": user,
+        "plan": plan,
+        "transactions": transactions,
+        "usage_stats": usage_stats,
+        "active_page": "users",
+        "user": current_user
+    })
+
+@app.get("/admin/create-user", response_class=HTMLResponse)
+async def admin_create_user_form(
+    request: Request,
+    current_user: models.User = Depends(get_admin_user),
+    db: Session = Depends(get_db)
+):
+    """
+    User creation form
+    """
+    if not templates:
+        raise HTTPException(status_code=500, detail="Templates not configured")
+    
+    # Get available plans
+    plans = db.query(models.PricingPlan).filter(models.PricingPlan.is_active == True).all()
+    
+    return templates.TemplateResponse("admin/create_user.html", {
+        "request": request,
+        "title": "Create User",
+        "plans": plans,
+        "active_page": "users",
+        "user": current_user
+    })
+
+@app.post("/admin/create-user")
+async def admin_create_user(
+    request: Request,
+    username: str = Form(...),
+    email: str = Form(...),
+    password: str = Form(...),
+    full_name: str = Form(None),
+    plan_id: str = Form(...),
+    current_user: models.User = Depends(get_admin_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Create a new user from admin dashboard
+    """
+    # Check if username already exists
+    existing_user = db.query(models.User).filter(models.User.username == username).first()
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username already registered"
+        )
+    
+    # Check if email already exists
+    existing_email = db.query(models.User).filter(models.User.email == email).first()
+    if existing_email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered"
+        )
+    
+    # Create new user
+    hashed_password = get_password_hash(password)
+    
+    new_user = models.User(
+        id=str(uuid.uuid4()),
+        username=username,
+        email=email,
+        full_name=full_name,
+        hashed_password=hashed_password,
+        plan_id=plan_id,
+        payment_status="Paid",  # Admin-created users are set to paid by default
+        words_used=0,
+        joined_date=datetime.utcnow(),
+        api_keys={},
+        is_active=True
+    )
+    
+    db.add(new_user)
+    db.commit()
+    
+    # Redirect to the users list
+    return RedirectResponse(url="/admin/users", status_code=303)
+
+@app.get("/admin/transactions", response_class=HTMLResponse)
+async def admin_transactions(
+    request: Request,
+    page: int = 1,
+    current_user: models.User = Depends(get_admin_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Transaction management page
+    """
+    if not templates:
+        raise HTTPException(status_code=500, detail="Templates not configured")
+    
+    # Get transactions with pagination
+    page_size = 20
+    offset = (page - 1) * page_size
+    
+    transactions = db.query(models.Transaction).order_by(
+        desc(models.Transaction.created_at)
+    ).offset(offset).limit(page_size).all()
+    
+    total_transactions = db.query(func.count(models.Transaction.id)).scalar() or 0
+    total_pages = (total_transactions + page_size - 1) // page_size
+    
+    # Fetch usernames for transactions
+    transaction_data = []
+    for tx in transactions:
+        user = db.query(models.User).filter(models.User.id == tx.user_id).first()
+        username = user.username if user else "Unknown"
+        
+        transaction_data.append({
+            "id": tx.id,
+            "short_id": tx.id[:8] + "...",
+            "username": username,
+            "user_id": tx.user_id,
+            "amount": tx.amount,
+            "currency": tx.currency,
+            "payment_method": tx.payment_method,
+            "status": tx.status,
+            "created_at": tx.created_at
+        })
+    
+    return templates.TemplateResponse("admin/transactions.html", {
+        "request": request,
+        "title": "Transaction Management",
+        "transactions": transaction_data,
+        "page": page,
+        "total_pages": total_pages,
+        "total_transactions": total_transactions,
+        "active_page": "transactions",
+        "user": current_user
+    })
+
+@app.get("/admin/logs", response_class=HTMLResponse)
+async def admin_logs(
+    request: Request,
+    page: int = 1,
+    endpoint: Optional[str] = None,
+    current_user: models.User = Depends(get_admin_user),
+    db: Session = Depends(get_db)
+):
+    """
+    API logs page
+    """
+    if not templates:
+        raise HTTPException(status_code=500, detail="Templates not configured")
+    
+    # Get logs with pagination and filtering
+    page_size = 50
+    offset = (page - 1) * page_size
+    
+    query = db.query(models.APILog)
+    if endpoint:
+        query = query.filter(models.APILog.endpoint == endpoint)
+    
+    logs = query.order_by(desc(models.APILog.timestamp)).offset(offset).limit(page_size).all()
+    
+    total_query = db.query(func.count(models.APILog.id))
+    if endpoint:
+        total_query = total_query.filter(models.APILog.endpoint == endpoint)
+    
+    total_logs = total_query.scalar() or 0
+    total_pages = (total_logs + page_size - 1) // page_size
+    
+    # Get unique endpoints for filtering
+    endpoints = db.query(models.APILog.endpoint).distinct().all()
+    endpoint_list = [ep[0] for ep in endpoints]
+    
+    return templates.TemplateResponse("admin/logs.html", {
+        "request": request,
+        "title": "API Logs",
+        "logs": logs,
+        "page": page,
+        "total_pages": total_pages,
+        "total_logs": total_logs,
+        "endpoints": endpoint_list,
+        "selected_endpoint": endpoint,
+        "active_page": "logs",
+        "user": current_user
+    })
+
+@app.get("/admin/settings", response_class=HTMLResponse)
+async def admin_settings(
+    request: Request,
+    current_user: models.User = Depends(get_admin_user),
+    db: Session = Depends(get_db)
+):
+    """
+    System settings page
+    """
+    if not templates:
+        raise HTTPException(status_code=500, detail="Templates not configured")
+    
+    # Get pricing plans
+    plans = db.query(models.PricingPlan).all()
+    
+    # Get environment variables and configuration
+    config = {
+        "PROJECT_NAME": PROJECT_NAME,
+        "PROJECT_VERSION": PROJECT_VERSION,
+        "HUMANIZER_API_URL": HUMANIZER_API_URL,
+        "AI_DETECTOR_API_URL": AI_DETECTOR_API_URL,
+        "RATE_LIMIT_REQUESTS": RATE_LIMIT_REQUESTS,
+        "RATE_LIMIT_PERIOD": RATE_LIMIT_PERIOD,
+        "ACCESS_TOKEN_EXPIRE_MINUTES": ACCESS_TOKEN_EXPIRE_MINUTES,
+        "ENVIRONMENT": os.getenv("RAILWAY_ENVIRONMENT_NAME", "production")
+    }
+    
+    return templates.TemplateResponse("admin/settings.html", {
+        "request": request,
+        "title": "System Settings",
+        "plans": plans,
+        "config": config,
+        "active_page": "settings",
+        "user": current_user
+    })
 
 # Database admin routes
 @app.get("/admin/database/reset")
