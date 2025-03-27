@@ -1,3 +1,4 @@
+# Keep the full file content and add a test route
 """
 Core application file for Andikar Backend API.
 This module provides a backend API gateway for the Andikar AI ecosystem.
@@ -1133,6 +1134,85 @@ async def index_html(request: Request):
 @app.get("/home", response_class=HTMLResponse)
 async def home(request: Request):
     return await root(request)
+
+# Test endpoint to verify template rendering
+@app.get("/test", response_class=HTMLResponse)
+async def test_page(request: Request):
+    """
+    Test page to verify template rendering
+    """
+    if not templates:
+        raise HTTPException(status_code=500, detail="Templates not configured")
+    
+    return templates.TemplateResponse("test.html", {
+        "request": request,
+        "title": "Test Page"
+    })
+
+# Direct admin access without authentication (for testing purposes)
+@app.get("/admin-test", response_class=HTMLResponse)
+async def admin_test(request: Request):
+    """
+    Test route for admin dashboard without authentication
+    """
+    if not templates:
+        raise HTTPException(status_code=500, detail="Templates not configured")
+    
+    # Create a mock user for testing
+    mock_user = {
+        "username": "admin",
+        "email": "admin@example.com",
+        "id": "test-id"
+    }
+    
+    # Minimal stats for displaying the template
+    stats = {
+        "users": {
+            "total": 10,
+            "active": 8,
+            "recent": []
+        },
+        "transactions": {
+            "successful": 5,
+            "pending": 2,
+            "total": 7
+        },
+        "api": {
+            "total_requests": 100,
+            "humanize_requests": 80,
+            "detect_requests": 20
+        }
+    }
+    
+    # Simple mock chart data
+    charts = {
+        "daily_users": json.dumps([{"date": "2025-03-01", "count": 1}, {"date": "2025-03-02", "count": 2}]),
+        "daily_api_usage": json.dumps([{"date": "2025-03-01", "humanize": 5, "detect": 2}, {"date": "2025-03-02", "humanize": 6, "detect": 3}])
+    }
+    
+    # System status
+    system = {
+        "database": "healthy",
+        "humanizer": "healthy",
+        "detector": "not_configured",
+        "mpesa": "healthy",
+        "info": {
+            "version": PROJECT_VERSION,
+            "python_env": "production",
+            "railway_project": "Not on Railway",
+            "railway_service": "Not on Railway"
+        }
+    }
+    
+    return templates.TemplateResponse("admin/dashboard.html", {
+        "request": request,
+        "title": "Admin Dashboard (Test)",
+        "user": mock_user,
+        "active_page": "dashboard",
+        "stats": stats,
+        "charts": charts,
+        "system": system
+    })
 
 # Add Admin routes
 @app.get("/admin", response_class=HTMLResponse)
