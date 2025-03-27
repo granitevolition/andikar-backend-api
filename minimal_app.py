@@ -10,9 +10,11 @@ import os
 import sys
 import logging
 from datetime import datetime
+import traceback
 import uvicorn
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 
 # Set up logging
 logging.basicConfig(
@@ -30,6 +32,13 @@ logger.info(f"Files in current directory: {os.listdir('.')}")
 
 # Initialize FastAPI app
 app = FastAPI(title="Minimal FastAPI App", description="Minimal app for debugging")
+
+# Mount static files
+try:
+    app.mount("/static", StaticFiles(directory="static"), name="static")
+    logger.info("Static files mounted successfully")
+except Exception as e:
+    logger.error(f"Could not mount static files: {e}")
 
 @app.get("/", response_class=HTMLResponse)
 async def root(request: Request):
@@ -120,8 +129,10 @@ async def root(request: Request):
             {('<pre>' + str(admin_contents) + '</pre>') if admin_dir_exists and admin_contents else ''}
         </div>
         
-        <h2>Application Links</h2>
+        <h2>Testing Pages</h2>
         <div class="links">
+            <a href="/direct">Direct HTML Page</a>
+            <a href="/admin-raw">Raw Admin HTML</a>
             <a href="/info">System Info</a>
             <a href="/status">Status Check</a>
             <a href="/directory">Directory Listing</a>
@@ -129,6 +140,79 @@ async def root(request: Request):
     </body>
     </html>
     """)
+
+@app.get("/direct", response_class=HTMLResponse)
+async def direct_html():
+    """Serve the direct.html file as a plain HTML response."""
+    try:
+        file_path = os.path.join("templates", "direct.html")
+        if not os.path.exists(file_path):
+            return HTMLResponse(f"<h1>Error: File not found</h1><p>The file {file_path} does not exist.</p>")
+        
+        with open(file_path, "r") as f:
+            content = f.read()
+        return HTMLResponse(content)
+    except Exception as e:
+        logger.error(f"Error serving direct.html: {e}")
+        return HTMLResponse(f"<h1>Error serving direct.html</h1><pre>{str(e)}</pre><pre>{traceback.format_exc()}</pre>")
+
+@app.get("/admin-raw", response_class=HTMLResponse)
+async def admin_raw():
+    """Attempt to serve dashboard.html directly without Jinja templating."""
+    try:
+        file_path = os.path.join("templates", "admin", "dashboard.html")
+        if not os.path.exists(file_path):
+            return HTMLResponse(
+                f"<h1>Error: Admin file not found</h1><p>The file {file_path} does not exist.</p>"
+            )
+        
+        # Read the file content
+        with open(file_path, "r") as f:
+            content = f.read()
+        
+        # Create a simplified version without Jinja templating
+        simplified_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Raw Admin Dashboard</title>
+            <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+            <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+            <style>
+                body {{ padding: 2rem; }}
+                .alert {{ margin-bottom: 1rem; }}
+                pre {{ background: #f8f9fa; padding: 1rem; border-radius: 0.25rem; overflow: auto; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>Raw Admin Dashboard Content</h1>
+                
+                <div class="alert alert-warning">
+                    <p><strong>Note:</strong> This is the raw content of the admin dashboard template without Jinja templating.</p>
+                    <p>The actual dashboard would have dynamic content and styling from the base template.</p>
+                </div>
+                
+                <div class="alert alert-info">
+                    <h4>File Path:</h4>
+                    <p>{file_path}</p>
+                </div>
+                
+                <h2>Template Content:</h2>
+                <pre>{content}</pre>
+                
+                <p><a href="/" class="btn btn-primary">Back to Home</a></p>
+            </div>
+        </body>
+        </html>
+        """
+        
+        return HTMLResponse(simplified_content)
+    except Exception as e:
+        logger.error(f"Error serving admin raw: {e}")
+        return HTMLResponse(f"<h1>Error serving admin dashboard</h1><pre>{str(e)}</pre><pre>{traceback.format_exc()}</pre>")
 
 @app.get("/info")
 async def info():
@@ -194,6 +278,14 @@ async def status():
         "service": "Minimal FastAPI App",
         "timestamp": datetime.utcnow().isoformat()
     }
+
+@app.get("/favicon.ico")
+async def favicon():
+    """Serve favicon."""
+    if os.path.exists("static/favicon.ico"):
+        return FileResponse("static/favicon.ico")
+    else:
+        return JSONResponse(status_code=404, content={"error": "Favicon not found"})
 
 # Main entry point
 if __name__ == "__main__":
