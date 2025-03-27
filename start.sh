@@ -9,14 +9,17 @@ set -e
 echo "========== ANDIKAR BACKEND API STARTUP =========="
 echo "Running as user: $(whoami)"
 echo "Current directory: $(pwd)"
+echo "Timestamp: $(date)"
 
-# Set up DATABASE_URL explicitly using environment variables or defaults
+# Set up DATABASE_URL explicitly using environment variables
 echo "Setting up database connection..."
-PGUSER=${PGUSER:-postgres}
-PGDATABASE=${PGDATABASE:-railway}
-POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-ztJggTeesPJYVMHRWuGVbnUinMKwCWyI}
-RAILWAY_TCP_PROXY_DOMAIN=${RAILWAY_TCP_PROXY_DOMAIN:-ballast.proxy.rlwy.net}
-RAILWAY_TCP_PROXY_PORT=${RAILWAY_TCP_PROXY_PORT:-11148}
+# Use the hardcoded password if environment variable isn't set
+export PGUSER=${PGUSER:-postgres}
+export PGDATABASE=${PGDATABASE:-railway}
+export POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-ztJggTeesPJYVMHRWuGVbnUinMKwCWyI}
+export PGPASSWORD=${PGPASSWORD:-$POSTGRES_PASSWORD}
+export RAILWAY_TCP_PROXY_DOMAIN=${RAILWAY_TCP_PROXY_DOMAIN:-ballast.proxy.rlwy.net}
+export RAILWAY_TCP_PROXY_PORT=${RAILWAY_TCP_PROXY_PORT:-11148}
 
 # Always use the TCP proxy connection - encode password for URL safety
 ENCODED_PASSWORD=$(echo -n "$POSTGRES_PASSWORD" | python -c "import sys, urllib.parse; print(urllib.parse.quote_plus(sys.stdin.read()))")
@@ -25,9 +28,9 @@ echo "Database URL set to: postgresql://$PGUSER:****@$RAILWAY_TCP_PROXY_DOMAIN:$
 
 # Display environment variables (excluding sensitive data)
 echo "Environment variables (excluding sensitive data):"
-env | grep -v PASSWORD | grep -v SECRET | grep -v KEY | grep -v TOKEN | sort
+env | grep -v PASSWORD | grep -v SECRET | grep -v KEY | grep -v TOKEN | grep -v PASSWORD | sort
 
-# Run database diagnostic
+# Run database diagnostic 
 echo "Running database diagnostic tool..."
 python db_diagnostic.py
 
@@ -52,6 +55,47 @@ while [ $attempt -le $max_attempts ]; do
     fi
     attempt=$((attempt + 1))
 done
+
+# Create health check endpoint
+echo "Creating health check endpoint..."
+cat > /app/health_check.py << 'EOF'
+#!/usr/bin/env python3
+from fastapi import FastAPI, Depends
+from database import get_db
+from sqlalchemy.orm import Session
+from sqlalchemy import text
+
+app = FastAPI()
+
+@app.get("/status")
+async def status():
+    """Health check endpoint for Railway"""
+    return {"status": "healthy"}
+
+@app.get("/health")
+async def health(db: Session = Depends(get_db)):
+    """Detailed health check endpoint"""
+    db_status = "unknown"
+    
+    try:
+        if db is not None:
+            db.execute(text("SELECT 1"))
+            db_status = "healthy"
+        else:
+            db_status = "unavailable"
+    except Exception as e:
+        db_status = f"error: {str(e)}"
+    
+    return {
+        "status": "healthy" if db_status == "healthy" else "degraded",
+        "database": db_status,
+        "api": "running"
+    }
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8080)
+EOF
 
 # Start the application using the entrypoint
 echo "Starting application on port ${PORT:-8080}..."
