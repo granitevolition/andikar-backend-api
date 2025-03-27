@@ -37,12 +37,14 @@ def get_database_url():
     Determine the most appropriate database URL to use.
     Tries multiple approaches based on Railway's deployment model.
     """
-    # Direct configuration from screenshots
-    pg_user = "postgres"
-    pg_password = os.getenv("POSTGRES_PASSWORD", "eLsHIpQoaRgtqGUMXAGzDXcIKLsIsRSf")
-    pg_db = "railway"
-    pg_port = "5432"
-    pg_host = "postgres.railway.internal"
+    # Railway PostgreSQL credentials from environment variables
+    pg_user = os.getenv("PGUSER", "postgres")
+    pg_password = os.getenv("POSTGRES_PASSWORD", "ztJggTeesPJYVMHRWuGVbnUinMKwCWyI")
+    pg_db = os.getenv("PGDATABASE", "railway")
+    pg_port = os.getenv("PGPORT", "5432")
+    pg_host = os.getenv("PGHOST", "postgres.railway.internal")
+    proxy_domain = os.getenv("RAILWAY_TCP_PROXY_DOMAIN", "ballast.proxy.rlwy.net")
+    proxy_port = os.getenv("RAILWAY_TCP_PROXY_PORT", "11148")
     
     # Option 1: Direct connection to postgres.railway.internal
     if check_host_connectivity(pg_host, int(pg_port)):
@@ -50,14 +52,7 @@ def get_database_url():
         database_url = f"postgresql://{pg_user}:{pg_password}@{pg_host}:{pg_port}/{pg_db}"
         return database_url
     
-    # Option 2: Connection using RAILWAY_PRIVATE_DOMAIN
-    private_domain = os.getenv("RAILWAY_PRIVATE_DOMAIN", "web.railway.internal")
-    if check_host_connectivity(private_domain, int(pg_port)):
-        logger.info(f"Connected to {private_domain}:{pg_port} successfully")
-        database_url = f"postgresql://{pg_user}:{pg_password}@{private_domain}:{pg_port}/{pg_db}"
-        return database_url
-    
-    # Option 3: Use DATABASE_URL from environment
+    # Option 2: Use DATABASE_URL from environment
     database_url = os.getenv("DATABASE_URL")
     if database_url:
         if "postgres:" in database_url:
@@ -65,15 +60,13 @@ def get_database_url():
         logger.info(f"Using DATABASE_URL from environment variable")
         return database_url
     
-    # Option 4: Try TCP proxy via public URL
-    proxy_domain = os.getenv("RAILWAY_TCP_PROXY_DOMAIN")
-    proxy_port = os.getenv("RAILWAY_TCP_PROXY_PORT")
+    # Option 3: Try TCP proxy via public URL
     if proxy_domain and proxy_port:
         logger.info(f"Using TCP proxy at {proxy_domain}:{proxy_port}")
         database_url = f"postgresql://{pg_user}:{pg_password}@{proxy_domain}:{proxy_port}/{pg_db}"
         return database_url
     
-    # Option 5: SQLite fallback
+    # Option 4: SQLite fallback
     logger.warning("No PostgreSQL connection configuration found, using SQLite fallback")
     return "sqlite:///./andikar.db"
 
