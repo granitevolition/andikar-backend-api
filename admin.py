@@ -6,7 +6,9 @@ from sqlalchemy import func, desc, text
 from datetime import datetime, timedelta
 import os
 import json
+import uuid
 from typing import Dict, List, Optional, Any, Union
+from passlib.context import CryptContext
 
 # Import database and models
 from database import get_db
@@ -20,6 +22,9 @@ admin_router = APIRouter(prefix="/admin")
 
 # Set up templates
 templates = Jinja2Templates(directory="templates")
+
+# Password context for hashing
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Dashboard route
 @admin_router.get("/", response_class=HTMLResponse)
@@ -151,6 +156,74 @@ async def admin_dashboard(
     }
     
     return templates.TemplateResponse("admin/dashboard.html", context)
+
+# Create new user
+@admin_router.get("/users/create", response_class=HTMLResponse)
+async def admin_create_user_form(
+    request: Request,
+    current_user: models.User = Depends(get_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Form to create a new user"""
+    # Get plans for dropdown
+    plans = db.query(models.PricingPlan).all()
+    
+    context = {
+        "request": request,
+        "user": current_user,
+        "plans": plans
+    }
+    
+    return templates.TemplateResponse("admin/create_user.html", context)
+
+@admin_router.post("/users/create")
+async def admin_create_user(
+    username: str = Form(...),
+    email: str = Form(...),
+    password: str = Form(...),
+    full_name: str = Form(None),
+    plan_id: str = Form("free"),
+    is_active: bool = Form(True),
+    payment_status: str = Form("Pending"),
+    words_used: int = Form(0),
+    current_user: models.User = Depends(get_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Create a new user from admin panel"""
+    # Check if username or email already exists
+    if db.query(models.User).filter(models.User.username == username).first():
+        raise HTTPException(status_code=400, detail="Username already exists")
+    
+    if db.query(models.User).filter(models.User.email == email).first():
+        raise HTTPException(status_code=400, detail="Email already exists")
+    
+    # Validate plan
+    plan = db.query(models.PricingPlan).filter(models.PricingPlan.id == plan_id).first()
+    if not plan:
+        raise HTTPException(status_code=400, detail=f"Plan '{plan_id}' does not exist")
+    
+    # Hash password
+    hashed_password = pwd_context.hash(password)
+    
+    # Create new user
+    new_user = models.User(
+        id=str(uuid.uuid4()),
+        username=username,
+        email=email,
+        full_name=full_name,
+        hashed_password=hashed_password,
+        plan_id=plan_id,
+        is_active=is_active,
+        payment_status=payment_status,
+        words_used=words_used,
+        joined_date=datetime.utcnow()
+    )
+    
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    
+    return RedirectResponse(f"/admin/users/{new_user.id}", status_code=303)
 
 # Users management
 @admin_router.get("/users", response_class=HTMLResponse)
@@ -287,6 +360,48 @@ async def admin_update_user(
     if payment_status is not None:
         user.payment_status = payment_status
     
+    db.commit()
+    
+    return RedirectResponse(f"/admin/users/{user_id}", status_code=303)
+
+# Adjust user words usage
+@admin_router.post("/users/{user_id}/adjust-words")
+async def admin_adjust_words(
+    user_id: str,
+    words_used: int = Form(...),
+    current_user: models.User = Depends(get_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Adjust user's word usage count"""
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Validate words_used
+    if words_used < 0:
+        raise HTTPException(status_code=400, detail="Words used cannot be negative")
+    
+    # Update user words_used
+    user.words_used = words_used
+    
+    # Record this adjustment in the usage stats
+    today = datetime.utcnow()
+    
+    # Create a record of this adjustment
+    adjustment_note = models.UsageStat(
+        id=str(uuid.uuid4()),
+        user_id=user_id,
+        year=today.year,
+        month=today.month,
+        day=today.day,
+        humanize_requests=0,
+        detect_requests=0,
+        words_processed=0,  # No words actually processed
+        total_processing_time=0,
+        updated_at=today
+    )
+    
+    db.add(adjustment_note)
     db.commit()
     
     return RedirectResponse(f"/admin/users/{user_id}", status_code=303)
