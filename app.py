@@ -37,7 +37,7 @@ logger = logging.getLogger("andikar-backend-api")
 
 # App configuration
 PROJECT_NAME = "Andikar Backend API"
-PROJECT_VERSION = "1.0.2"
+PROJECT_VERSION = "1.0.3"  # Updated version number
 SECRET_KEY = os.getenv("SECRET_KEY", "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 1440  # 24 hours
@@ -411,6 +411,7 @@ async def root(request: Request):
                 <li><a href="/admin-test">/admin-test</a> - Test admin dashboard without authentication</li>
                 <li><a href="/admin">/admin</a> - Admin Dashboard (requires authentication)</li>
                 <li><a href="/admin/database/seed">/admin/database/seed</a> - Seed database with initial data (login with username: admin, password: admin123)</li>
+                <li><a href="/status-debug">/status-debug</a> - Debugging information about available routes</li>
             </ul>
         </div>
         
@@ -511,14 +512,61 @@ async def root(request: Request):
     </html>
     """)
 
-# Status endpoint for healthcheck
+# Status endpoint for healthcheck - MODIFIED TO INCLUDE DEBUG INFO
 @app.get("/status")
 async def status_check():
+    # List all registered routes for debugging
+    routes_info = []
+    for route in app.routes:
+        routes_info.append({
+            "path": route.path,
+            "name": route.name,
+            "methods": route.methods if hasattr(route, "methods") else None
+        })
+    
     return {
         "status": "healthy",
         "message": "Application is running",
         "progress": 100,
-        "complete": True
+        "complete": True,
+        "version": PROJECT_VERSION,
+        "routes_count": len(app.routes),
+        "admin_routes": [r for r in routes_info if "admin" in r["path"]]
+    }
+
+# Additional debugging endpoint
+@app.get("/status-debug")
+async def status_debug():
+    # List all registered routes
+    routes_info = []
+    for route in app.routes:
+        routes_info.append({
+            "path": route.path,
+            "name": route.name,
+            "methods": route.methods if hasattr(route, "methods") else None
+        })
+    
+    # Get app information
+    app_info = {
+        "title": app.title,
+        "version": app.version,
+        "description": app.description,
+        "routes_count": len(app.routes),
+        "middleware_count": len(app.middleware),
+        "dependencies": str(app.dependencies),
+        "admin_routes": [r for r in routes_info if "admin" in r["path"]],
+        "environment": {
+            "RAILWAY_ENVIRONMENT_NAME": os.getenv("RAILWAY_ENVIRONMENT_NAME", "not set"),
+            "PORT": os.getenv("PORT", "not set"),
+            "DATABASE_URL": os.getenv("DATABASE_URL", "not set").replace(":", "*:*") if os.getenv("DATABASE_URL") else "not set"
+        }
+    }
+    
+    return {
+        "status": "debug",
+        "timestamp": datetime.utcnow().isoformat(),
+        "app_info": app_info,
+        "all_routes": routes_info
     }
 
 # Health check endpoint
