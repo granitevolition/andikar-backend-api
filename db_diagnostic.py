@@ -55,7 +55,6 @@ def get_connection_options():
     
     # Full connection strings
     options['database_url'] = os.getenv("DATABASE_URL")
-    options['database_public_url'] = os.getenv("DATABASE_PUBLIC_URL")
     
     return options
 
@@ -200,7 +199,6 @@ def main():
     print_header("DATABASE ENVIRONMENT VARIABLES")
     env_vars = [
         ("DATABASE_URL", options.get('database_url', "Not set")),
-        ("DATABASE_PUBLIC_URL", options.get('database_public_url', "Not set")),
         ("PGUSER", options.get('pg_user', "Not set")),
         ("PGDATABASE", options.get('pg_db', "Not set")),
         ("PGHOST", options.get('pg_host', "Not set")),
@@ -211,13 +209,13 @@ def main():
     
     for name, value in env_vars:
         if name == "DATABASE_URL" and value != "Not set":
-            parts = value.split(":")
-            masked = f"{parts[0]}:{parts[1]}:****@" + value.split("@")[1]
-            print(f"{name}: {masked}")
-        elif name == "DATABASE_PUBLIC_URL" and value != "Not set":
-            parts = value.split(":")
-            masked = f"{parts[0]}:{parts[1]}:****@" + value.split("@")[1]
-            print(f"{name}: {masked}")
+            # Safely mask the password
+            try:
+                parts = value.split(":")
+                masked = f"{parts[0]}:{parts[1]}:****@" + value.split("@")[1]
+                print(f"{name}: {masked}")
+            except (AttributeError, IndexError):
+                print(f"{name}: <error masking URL>")
         elif name != "POSTGRES_PASSWORD":
             print(f"{name}: {value}")
     
@@ -231,22 +229,13 @@ def main():
         else:
             print(f"❌ Could not connect to {proxy_host}:{proxy_port}")
     
-    pg_host = options.get('pg_host')
-    pg_port = options.get('pg_port')
-    if pg_host and pg_port:
-        print(f"\nChecking connectivity to {pg_host}:{pg_port}...")
-        if check_host_connectivity(pg_host, pg_port):
-            print(f"✅ Connection to {pg_host}:{pg_port} is available")
-        else:
-            print(f"❌ Could not connect to {pg_host}:{pg_port}")
-    
     # Test database connections
     print_header("DATABASE CONNECTION TEST")
     
     # Build connection strings
     connection_strings = []
     
-    # Priority 1: Proxy connection (most reliable in Railway)
+    # Priority 1: External proxy connection (most reliable)
     if proxy_host and proxy_port:
         proxy_conn_string = f"postgresql://{options.get('pg_user')}:{options.get('pg_password')}@{proxy_host}:{proxy_port}/{options.get('pg_db')}"
         connection_strings.append((proxy_conn_string, "Railway TCP Proxy"))
@@ -257,18 +246,6 @@ def main():
         if db_url.startswith("postgres:"):
             db_url = db_url.replace("postgres:", "postgresql:")
         connection_strings.append((db_url, "DATABASE_URL"))
-    
-    # Priority 3: Public database URL if set
-    if options.get('database_public_url'):
-        db_public_url = options.get('database_public_url')
-        if db_public_url.startswith("postgres:"):
-            db_public_url = db_public_url.replace("postgres:", "postgresql:")
-        connection_strings.append((db_public_url, "DATABASE_PUBLIC_URL"))
-    
-    # Priority 4: Direct internal connection
-    if pg_host and pg_port:
-        direct_conn_string = f"postgresql://{options.get('pg_user')}:{options.get('pg_password')}@{pg_host}:{pg_port}/{options.get('pg_db')}"
-        connection_strings.append((direct_conn_string, "Direct internal connection"))
     
     # Test each connection
     success = False
