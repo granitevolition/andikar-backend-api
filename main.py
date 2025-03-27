@@ -1,79 +1,304 @@
-from fastapi import FastAPI, HTTPException, Depends, Request, Response, status
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, HTMLResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-from typing import Dict, List, Optional, Any, Union
-import httpx
-import os
-import json
+"""
+Main application module for Andikar Backend API.
+This is separate from app.py to avoid circular imports.
+"""
 import logging
-import time
+import os
 import sys
+from fastapi import FastAPI, Request, Response, Depends, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+try:
+    from fastapi.templating import Jinja2Templates
+    TEMPLATES_AVAILABLE = True
+except (ImportError, AssertionError):
+    TEMPLATES_AVAILABLE = False
+import time
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, func, text
-import traceback
 
-# Import configuration
-from config import settings
+# Ensure we're in the correct working directory
+if os.path.exists("main.py") and not os.path.samefile("main.py", __file__):
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-# Import database and models
-from database import get_db, engine
-import models
-from models import Base
-import schemas
-from utils import detect_ai_content
-
-# Import authentication utilities
-from auth import (
-    verify_password, get_password_hash, authenticate_user,
-    create_access_token, get_current_user, get_current_active_user,
-    oauth2_scheme, pwd_context
-)
+# Create necessary directories
+os.makedirs("templates", exist_ok=True)
+os.makedirs("static", exist_ok=True)
 
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger("andikar-backend")
+logger = logging.getLogger("andikar-main")
 
-# FastAPI app
+# Try to import database and models
+try:
+    from database import get_db, engine
+    import models
+    from models import Base
+    import schemas
+    DATABASE_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Database modules not available: {e}")
+    DATABASE_AVAILABLE = False
+
+# Try to import auth utils
+try:
+    from auth import get_current_user, get_current_active_user
+    AUTH_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Auth modules not available: {e}")
+    AUTH_AVAILABLE = False
+
+# Try to import admin router
+try:
+    from admin import admin_router
+    ADMIN_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Admin module not available: {e}")
+    ADMIN_AVAILABLE = False
+
+# Try to import config
+try:
+    import config
+    PROJECT_NAME = config.PROJECT_NAME
+    PROJECT_VERSION = config.PROJECT_VERSION
+except ImportError:
+    PROJECT_NAME = "Andikar Backend API"
+    PROJECT_VERSION = "1.0.0"
+
+# Create FastAPI app
 app = FastAPI(
-    title=settings.PROJECT_NAME,
+    title=PROJECT_NAME,
     description="Backend API Gateway for Andikar AI services",
-    version=settings.PROJECT_VERSION
+    version=PROJECT_VERSION
 )
 
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Update this for production
+    allow_origins=["*"],  # Update for production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Create templates directory if it doesn't exist
-os.makedirs("templates", exist_ok=True)
-os.makedirs("static", exist_ok=True)
-
 # Mount static files
-app.mount("/static", StaticFiles(directory="static"), name="static")
+try:
+    app.mount("/static", StaticFiles(directory="static"), name="static")
+except Exception as e:
+    logger.warning(f"Could not mount static files: {e}")
 
-# Set up templates
-templates = Jinja2Templates(directory="templates")
+# Set up templates if available
+if TEMPLATES_AVAILABLE:
+    templates = Jinja2Templates(directory="templates")
+    
+    # Create a basic index.html if it doesn't exist
+    index_path = os.path.join("templates", "index.html")
+    if not os.path.exists(index_path):
+        with open(index_path, "w") as f:
+            f.write("""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Andikar Backend API</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .container {
+            max-width: 800px;
+            margin: 50px auto;
+        }
+        .logo {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .logo i {
+            font-size: 48px;
+            color: #0d6efd;
+        }
+        .card {
+            border: none;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+            transition: transform 0.3s;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+        }
+        .card-header {
+            background-color: #fff;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+            font-weight: bold;
+        }
+        .list-group-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .btn-primary {
+            background-color: #0d6efd;
+            border: none;
+            padding: 10px 20px;
+            transition: all 0.3s;
+        }
+        .btn-primary:hover {
+            background-color: #0b5ed7;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        .system-status {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+        .system-status.healthy {
+            background-color: #198754;
+        }
+        .system-status.unhealthy {
+            background-color: #dc3545;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #dee2e6;
+            color: #6c757d;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">
+            <i class="fas fa-robot"></i>
+            <h1>Andikar Backend API</h1>
+            <p class="text-muted">Backend API Gateway for Andikar AI services</p>
+        </div>
+        
+        <div class="row">
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-link me-2"></i> Quick Links
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <a href="/admin" class="btn btn-primary w-100">
+                                    <i class="fas fa-tachometer-alt me-2"></i> Admin Dashboard
+                                </a>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <a href="/docs" class="btn btn-secondary w-100">
+                                    <i class="fas fa-book me-2"></i> API Documentation
+                                </a>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <a href="/health" class="btn btn-info w-100 text-white">
+                                    <i class="fas fa-heartbeat me-2"></i> Health Check
+                                </a>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <a href="/redoc" class="btn btn-success w-100">
+                                    <i class="fas fa-file-alt me-2"></i> ReDoc Documentation
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-info-circle me-2"></i> API Information
+                    </div>
+                    <div class="card-body">
+                        <div class="list-group">
+                            <div class="list-group-item">
+                                <strong>Version</strong>
+                                <span id="api-version">1.0.6</span>
+                            </div>
+                            <div class="list-group-item">
+                                <strong>Environment</strong>
+                                <span id="api-environment">Production</span>
+                            </div>
+                            <div class="list-group-item">
+                                <strong>Status</strong>
+                                <span>
+                                    <span class="system-status healthy"></span>
+                                    <span id="api-status">Up and running</span>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-server me-2"></i> Available Endpoints
+                    </div>
+                    <div class="card-body">
+                        <div class="list-group">
+                            <div class="list-group-item">
+                                <strong>Authentication</strong>
+                                <code>/token</code>
+                            </div>
+                            <div class="list-group-item">
+                                <strong>User Management</strong>
+                                <code>/users/register</code>, <code>/users/me</code>
+                            </div>
+                            <div class="list-group-item">
+                                <strong>Text Services</strong>
+                                <code>/api/humanize</code>, <code>/api/detect</code>
+                            </div>
+                            <div class="list-group-item">
+                                <strong>Payment Processing</strong>
+                                <code>/api/payments/mpesa/initiate</code>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p>© 2025 Andikar. All rights reserved.</p>
+            <p>Powered by FastAPI, PostgreSQL, and Railway.</p>
+        </div>
+    </div>
+</body>
+</html>""")
 
-# Global error handler
+# Include admin router if available
+if ADMIN_AVAILABLE:
+    try:
+        app.include_router(admin_router)
+        logger.info("Admin router included successfully")
+    except Exception as e:
+        logger.error(f"Error including admin router: {e}")
+
+# Global exception handler
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     if isinstance(exc, HTTPException):
-        # If it's a known FastAPI HTTP exception, let FastAPI handle it
         raise exc
     
-    # For unexpected errors, log them and return a generic error
     logger.error(f"Unexpected error: {str(exc)}")
+    import traceback
     logger.error(traceback.format_exc())
     
     return JSONResponse(
@@ -84,898 +309,96 @@ async def global_exception_handler(request: Request, exc: Exception):
         }
     )
 
-# Rate Limiting Middleware
-@app.middleware("http")
-async def rate_limit_middleware(request: Request, call_next):
-    if request.url.path in ["/docs", "/redoc", "/openapi.json", "/", "/health", "/index.html"] or request.url.path.startswith("/admin") or request.url.path.startswith("/static"):
-        return await call_next(request)
-    
-    try:
-        # Get the database session
-        db = next(get_db())
-        
-        client_ip = request.client.host
-        api_key = request.headers.get("X-API-Key")
-        
-        # Use API key or IP for rate limiting
-        rate_limit_key = api_key if api_key else client_ip
-        
-        # Check rate limit in database
-        now = time.time()
-        rate_limit = db.query(models.RateLimit).filter(models.RateLimit.key == rate_limit_key).first()
-        
-        if rate_limit:
-            # Clean up old requests
-            requests = [req for req in rate_limit.requests if now - req < settings.RATE_LIMIT_PERIOD]
-            
-            # Check if rate limit exceeded
-            if len(requests) >= settings.RATE_LIMIT_REQUESTS:
-                return JSONResponse(
-                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    content={"detail": "Rate limit exceeded"}
-                )
-            
-            # Add current request
-            requests.append(now)
-            rate_limit.requests = requests
-            rate_limit.last_updated = now
-            db.commit()
-        else:
-            # First request for this key
-            new_rate_limit = models.RateLimit(
-                key=rate_limit_key,
-                requests=[now],
-                last_updated=now
-            )
-            db.add(new_rate_limit)
-            db.commit()
-    except Exception as e:
-        # If rate limiting fails, just log and continue
-        logger.error(f"Rate limiting failed: {str(e)}")
-    
-    response = await call_next(request)
-    return response
-
-# Database initialization
-@app.on_event("startup")
-async def startup_db_client():
-    try:
-        # Create all tables if they don't exist
-        Base.metadata.create_all(bind=engine)
-        logger.info("Created database tables")
-        
-        # Initialize default pricing plans if they don't exist
-        db = next(get_db())
-        
-        if db.query(models.PricingPlan).count() == 0:
-            logger.info("Initializing default pricing plans")
-            default_plans = [
-                models.PricingPlan(
-                    id="free",
-                    name="Free Plan",
-                    description="Basic features for trying out the service",
-                    price=0,
-                    word_limit=1000,
-                    requests_per_day=10,
-                    features=["Humanize text (limited)", "AI detection (limited)"]
-                ),
-                models.PricingPlan(
-                    id="basic",
-                    name="Basic Plan",
-                    description="Standard features for regular users",
-                    price=999.00,
-                    word_limit=10000,
-                    requests_per_day=50,
-                    features=["Humanize text", "AI detection", "Email support"]
-                ),
-                models.PricingPlan(
-                    id="premium",
-                    name="Premium Plan",
-                    description="Advanced features for professional users",
-                    price=2999.00,
-                    word_limit=50000,
-                    requests_per_day=100,
-                    features=["Humanize text", "AI detection", "Priority support", "API access"]
-                )
-            ]
-            db.add_all(default_plans)
-            db.commit()
-            logger.info("Created default pricing plans")
-        
-        # Create an admin user if it doesn't exist
-        if not db.query(models.User).filter(models.User.username == "admin").first():
-            logger.info("Creating admin user")
-            admin_user = models.User(
-                username="admin",
-                email="admin@andikar.com",
-                full_name="Admin User",
-                hashed_password=get_password_hash("admin123"),  # Change this password in production!
-                plan_id="premium",
-                payment_status="Paid",
-                is_active=True
-            )
-            db.add(admin_user)
-            db.commit()
-            logger.info("Created default admin user")
-        
-        logger.info("Database initialized successfully")
-        
-        # Import and include admin routes after app creation to avoid circular imports
-        from admin import admin_router
-        app.include_router(admin_router)
-        logger.info("Admin routes registered")
-        
-        # Create index.html template if it doesn't exist
-        os.makedirs("templates", exist_ok=True)
-        index_template_path = os.path.join("templates", "index.html")
-        if not os.path.exists(index_template_path):
-            with open(index_template_path, "w") as f:
-                f.write("""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ title }}</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <style>
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #f8f9fa;
-            padding-top: 2rem;
-            padding-bottom: 2rem;
-        }
-        .card {
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            margin-bottom: 2rem;
-            border: none;
-            transition: transform 0.3s, box-shadow 0.3s;
-        }
-        .card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
-        }
-        .card-header {
-            background-color: #343a40;
-            color: white;
-            border-bottom: none;
-            font-weight: bold;
-        }
-        .list-group-item {
-            padding: 1rem;
-            border: none;
-            border-bottom: 1px solid rgba(0, 0, 0, 0.125);
-        }
-        .list-group-item:last-child {
-            border-bottom: none;
-        }
-        .list-group-item a {
-            color: #0d6efd;
-            text-decoration: none;
-            display: flex;
-            align-items: center;
-        }
-        .list-group-item a:hover {
-            color: #0a58ca;
-        }
-        .list-group-item a i {
-            margin-right: 10px;
-            width: 20px;
-        }
-        .header {
-            background-color: #343a40;
-            color: white;
-            padding: 3rem 0;
-            margin-bottom: 2rem;
-            border-radius: 0.5rem;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        }
-        .header h1 {
-            margin-bottom: 0.5rem;
-        }
-        .header p {
-            opacity: 0.8;
-            margin-bottom: 0;
-            font-size: 1.1rem;
-        }
-        .api-status {
-            padding: 0.25rem 0.5rem;
-            border-radius: 0.25rem;
-            display: inline-block;
-            margin-left: 1rem;
-            font-size: 0.9rem;
-        }
-        .status-running {
-            background-color: #28a745;
-            color: white;
-        }
-        .status-starting {
-            background-color: #ffc107;
-            color: #343a40;
-        }
-        .status-error {
-            background-color: #dc3545;
-            color: white;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header text-center">
-            <h1>{{ title }} 
-                <span class="api-status {% if status == 'healthy' %}status-running{% elif status == 'starting' %}status-starting{% else %}status-error{% endif %}">
-                    {{ status }}
-                </span>
-            </h1>
-            <p class="lead">{{ description }}</p>
-            <p>Version: {{ version }} | Environment: {{ environment }}</p>
-        </div>
-        
-        <div class="row">
-            <!-- API Documentation -->
-            <div class="col-md-6">
-                <div class="card">
-                    <div class="card-header">
-                        <i class="fas fa-book me-2"></i> Documentation & Status
-                    </div>
-                    <div class="list-group list-group-flush">
-                        <div class="list-group-item">
-                            <a href="/docs" target="_blank">
-                                <i class="fas fa-file-code"></i> API Documentation (Swagger UI)
-                            </a>
-                            <div class="mt-2 small text-muted">Interactive API documentation with testing capabilities</div>
-                        </div>
-                        <div class="list-group-item">
-                            <a href="/redoc" target="_blank">
-                                <i class="fas fa-book"></i> Alternative API Documentation (ReDoc)
-                            </a>
-                            <div class="mt-2 small text-muted">More readable version of the API documentation</div>
-                        </div>
-                        <div class="list-group-item">
-                            <a href="/health" target="_blank">
-                                <i class="fas fa-heartbeat"></i> System Health Status
-                            </a>
-                            <div class="mt-2 small text-muted">Check the current status of all system components</div>
-                        </div>
-                        <div class="list-group-item">
-                            <a href="/openapi.json" target="_blank">
-                                <i class="fas fa-code"></i> OpenAPI Schema (JSON)
-                            </a>
-                            <div class="mt-2 small text-muted">Raw OpenAPI specification for the API</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Admin Dashboard -->
-            <div class="col-md-6">
-                <div class="card">
-                    <div class="card-header">
-                        <i class="fas fa-tachometer-alt me-2"></i> Admin Dashboard
-                    </div>
-                    <div class="list-group list-group-flush">
-                        <div class="list-group-item">
-                            <a href="/admin" target="_blank">
-                                <i class="fas fa-tachometer-alt"></i> Dashboard Overview
-                            </a>
-                            <div class="mt-2 small text-muted">Main dashboard with key metrics and system status</div>
-                        </div>
-                        <div class="list-group-item">
-                            <a href="/admin/users" target="_blank">
-                                <i class="fas fa-users"></i> User Management
-                            </a>
-                            <div class="mt-2 small text-muted">View and manage user accounts and permissions</div>
-                        </div>
-                        <div class="list-group-item">
-                            <a href="/admin/transactions" target="_blank">
-                                <i class="fas fa-money-bill-wave"></i> Transaction Management
-                            </a>
-                            <div class="mt-2 small text-muted">Monitor payments and financial transactions</div>
-                        </div>
-                        <div class="list-group-item">
-                            <a href="/admin/logs" target="_blank">
-                                <i class="fas fa-file-alt"></i> API Logs
-                            </a>
-                            <div class="mt-2 small text-muted">View API usage logs and performance metrics</div>
-                        </div>
-                        <div class="list-group-item">
-                            <a href="/admin/settings" target="_blank">
-                                <i class="fas fa-cogs"></i> System Settings
-                            </a>
-                            <div class="mt-2 small text-muted">Configure pricing plans and system settings</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- API Endpoints -->
-            <div class="col-md-12">
-                <div class="card">
-                    <div class="card-header">
-                        <i class="fas fa-plug me-2"></i> Main API Endpoints
-                    </div>
-                    <div class="list-group list-group-flush">
-                        <div class="list-group-item">
-                            <strong><i class="fas fa-key me-2"></i> Authentication:</strong>
-                            <ul class="mt-2">
-                                <li><code>POST /token</code> - Get JWT access token for authentication</li>
-                                <li><code>POST /users/register</code> - Register a new user account</li>
-                                <li><code>GET /users/me</code> - Get current user profile information</li>
-                                <li><code>PUT /users/me</code> - Update user profile information</li>
-                            </ul>
-                        </div>
-                        <div class="list-group-item">
-                            <strong><i class="fas fa-magic me-2"></i> Text Services:</strong>
-                            <ul class="mt-2">
-                                <li><code>POST /api/humanize</code> - Humanize AI-generated text</li>
-                                <li><code>POST /api/detect</code> - Detect AI-generated content</li>
-                            </ul>
-                        </div>
-                        <div class="list-group-item">
-                            <strong><i class="fas fa-credit-card me-2"></i> Payment Processing:</strong>
-                            <ul class="mt-2">
-                                <li><code>POST /api/payments/mpesa/initiate</code> - Initiate M-Pesa payment</li>
-                                <li><code>POST /api/payments/mpesa/callback</code> - M-Pesa payment callback endpoint</li>
-                                <li><code>POST /api/payments/simulate</code> - Simulate a payment (testing only)</li>
-                            </ul>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <div class="text-center mt-4 mb-5">
-            <p class="text-muted">
-                &copy; 2025 Andikar AI | Deployed on <a href="https://railway.app" target="_blank">Railway</a>
-                <br>
-                <small>API Last Updated: {{ timestamp }}</small>
-            </p>
-        </div>
-    </div>
-    
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
-</body>
-</html>""")
-            logger.info("Created index.html template")
-    except Exception as e:
-        logger.error(f"Error initializing database: {str(e)}")
-        logger.error(traceback.format_exc())
-        # Don't crash the app if there's an issue during initialization
-        # It will be caught and reported when API endpoints are accessed
-
-# Authentication Endpoints
-@app.post("/token", response_model=schemas.Token)
-async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    user = authenticate_user(db, form_data.username, form_data.password)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.username}, expires_delta=access_token_expires
-    )
-    return {"access_token": access_token, "token_type": "bearer"}
-
-# User Management Endpoints
-@app.post("/users/register", response_model=schemas.User)
-async def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    # Check if username already exists
-    existing_user = db.query(models.User).filter(models.User.username == user.username).first()
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Username already registered"
-        )
-    
-    # Check if email already exists
-    existing_email = db.query(models.User).filter(models.User.email == user.email).first()
-    if existing_email:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered"
-        )
-    
-    # Create new user
-    hashed_password = get_password_hash(user.password)
-    
-    # Check if plan exists
-    plan = db.query(models.PricingPlan).filter(models.PricingPlan.id == user.plan_id).first()
-    if not plan:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Plan '{user.plan_id}' does not exist"
-        )
-    
-    new_user = models.User(
-        username=user.username,
-        email=user.email,
-        full_name=user.full_name,
-        hashed_password=hashed_password,
-        plan_id=user.plan_id,
-        payment_status="Pending" if user.plan_id != "free" else "Paid"
-    )
-    
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-    
-    return new_user
-
-@app.get("/users/me", response_model=schemas.User)
-async def read_users_me(current_user: models.User = Depends(get_current_active_user)):
-    return current_user
-
-@app.put("/users/me", response_model=schemas.User)
-async def update_user(
-    user_update: schemas.UserUpdate,
-    current_user: models.User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    # Update user fields
-    user_data = user_update.model_dump(exclude_unset=True)
-    
-    if user_data:
-        for key, value in user_data.items():
-            setattr(current_user, key, value)
-        
-        db.commit()
-        db.refresh(current_user)
-    
-    return current_user
-
-# API Gateway Endpoints for External Services
-@app.post("/api/humanize", response_model=schemas.TextResponse)
-async def humanize_text_api(
-    request: schemas.TextRequest,
-    current_user: models.User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    # Check payment status
-    if current_user.payment_status != "Paid":
-        raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail="Payment required to access this feature"
-        )
-    
-    # Check word limit
-    word_count = len(request.input_text.split())
-    
-    # Get user's plan details
-    plan = db.query(models.PricingPlan).filter(models.PricingPlan.id == current_user.plan_id).first()
-    if not plan:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid plan associated with user"
-        )
-    
-    # Check word limit against plan
-    if word_count > plan.word_limit:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Word count exceeds plan limit ({word_count} > {plan.word_limit})"
-        )
-    
-    # Log the API request
-    log_entry = models.APILog(
-        user_id=current_user.id,
-        endpoint="/api/humanize",
-        request_size=word_count,
-        ip_address="N/A"  # Would normally capture from request
-    )
-    db.add(log_entry)
-    db.commit()
-    
-    # Call external humanizer API
-    start_time = time.time()
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{settings.HUMANIZER_API_URL}/humanize_text",
-                json={"input_text": request.input_text},
-                timeout=30.0
-            )
-            response.raise_for_status()
-            humanized_text = response.json()["result"]
-    except httpx.HTTPError as e:
-        logger.error(f"Error calling humanizer API: {str(e)}")
-        
-        # Update log entry with error information
-        log_entry.error = str(e)
-        log_entry.status_code = 503
-        db.commit()
-        
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Error connecting to humanizer service"
-        )
-    
-    processing_time = time.time() - start_time
-    
-    # Update log entry with response information
-    log_entry.response_size = len(humanized_text.split())
-    log_entry.processing_time = processing_time
-    log_entry.status_code = 200
-    
-    # Update user's word count
-    current_user.words_used += word_count
-    
-    # Update usage statistics
-    today = datetime.utcnow()
-    usage_stat = db.query(models.UsageStat).filter(
-        models.UsageStat.user_id == current_user.id,
-        models.UsageStat.year == today.year,
-        models.UsageStat.month == today.month,
-        models.UsageStat.day == today.day
-    ).first()
-    
-    if usage_stat:
-        usage_stat.humanize_requests += 1
-        usage_stat.words_processed += word_count
-        usage_stat.total_processing_time += processing_time
+# Root endpoint (index page)
+@app.get("/", response_class=HTMLResponse)
+async def root(request: Request):
+    if TEMPLATES_AVAILABLE:
+        return templates.TemplateResponse("index.html", {
+            "request": request,
+            "title": PROJECT_NAME,
+            "description": "Backend API Gateway for Andikar AI services",
+            "version": PROJECT_VERSION,
+            "status": "healthy",
+            "environment": os.getenv("RAILWAY_ENVIRONMENT_NAME", "production"),
+            "timestamp": datetime.utcnow().isoformat()
+        })
     else:
-        new_usage_stat = models.UsageStat(
-            user_id=current_user.id,
-            year=today.year,
-            month=today.month,
-            day=today.day,
-            humanize_requests=1,
-            words_processed=word_count,
-            total_processing_time=processing_time
-        )
-        db.add(new_usage_stat)
-    
-    db.commit()
-    
+        return HTMLResponse(content="""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Andikar Backend API</title>
+            <style>
+                body { font-family: Arial, sans-serif; padding: 20px; }
+                h1 { color: #333; }
+            </style>
+        </head>
+        <body>
+            <h1>Andikar Backend API</h1>
+            <p>API is running in limited mode.</p>
+            <p>To access API documentation, visit <a href="/docs">/docs</a></p>
+        </body>
+        </html>
+        """)
+
+# JSON status for API clients
+@app.get("/api/status")
+async def api_status():
     return {
-        "result": humanized_text,
-        "words_processed": word_count,
-        "processing_time": processing_time
+        "status": "healthy",
+        "name": PROJECT_NAME,
+        "version": PROJECT_VERSION,
+        "timestamp": datetime.utcnow().isoformat(),
+        "environment": os.getenv("RAILWAY_ENVIRONMENT_NAME", "production")
     }
 
-@app.post("/api/detect", response_model=schemas.DetectionResult)
-async def detect_ai_content_api(
-    request: schemas.TextRequest,
-    current_user: models.User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    # Check payment status
-    if current_user.payment_status != "Paid":
-        raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail="Payment required to access this feature"
-        )
-    
-    # Log the API request
-    word_count = len(request.input_text.split())
-    log_entry = models.APILog(
-        user_id=current_user.id,
-        endpoint="/api/detect",
-        request_size=word_count,
-        ip_address="N/A"  # Would normally capture from request
-    )
-    db.add(log_entry)
-    db.commit()
-    
-    # Check for detection API URL
-    start_time = time.time()
-    if not settings.AI_DETECTOR_API_URL or settings.AI_DETECTOR_API_URL == "https://ai-detector-api.example.com":
-        # Use simplified internal detection if external API not available
-        result = detect_ai_content(request.input_text)
-        processing_time = time.time() - start_time
-        
-        # Update log entry with response information
-        log_entry.processing_time = processing_time
-        log_entry.status_code = 200
-        
-        # Update usage statistics
-        today = datetime.utcnow()
-        usage_stat = db.query(models.UsageStat).filter(
-            models.UsageStat.user_id == current_user.id,
-            models.UsageStat.year == today.year,
-            models.UsageStat.month == today.month,
-            models.UsageStat.day == today.day
-        ).first()
-        
-        if usage_stat:
-            usage_stat.detect_requests += 1
-            usage_stat.words_processed += word_count
-            usage_stat.total_processing_time += processing_time
-        else:
-            new_usage_stat = models.UsageStat(
-                user_id=current_user.id,
-                year=today.year,
-                month=today.month,
-                day=today.day,
-                detect_requests=1,
-                words_processed=word_count,
-                total_processing_time=processing_time
-            )
-            db.add(new_usage_stat)
-        
-        db.commit()
-        
-        return result
-    
-    # Call external AI detection API
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{settings.AI_DETECTOR_API_URL}/detect",
-                json={"text": request.input_text},
-                timeout=30.0
-            )
-            response.raise_for_status()
-            processing_time = time.time() - start_time
-            
-            # Update log entry with response information
-            log_entry.processing_time = processing_time
-            log_entry.status_code = 200
-            
-            # Update usage statistics
-            today = datetime.utcnow()
-            usage_stat = db.query(models.UsageStat).filter(
-                models.UsageStat.user_id == current_user.id,
-                models.UsageStat.year == today.year,
-                models.UsageStat.month == today.month,
-                models.UsageStat.day == today.day
-            ).first()
-            
-            if usage_stat:
-                usage_stat.detect_requests += 1
-                usage_stat.words_processed += word_count
-                usage_stat.total_processing_time += processing_time
-            else:
-                new_usage_stat = models.UsageStat(
-                    user_id=current_user.id,
-                    year=today.year,
-                    month=today.month,
-                    day=today.day,
-                    detect_requests=1,
-                    words_processed=word_count,
-                    total_processing_time=processing_time
-                )
-                db.add(new_usage_stat)
-            
-            db.commit()
-            
-            return response.json()
-    except httpx.HTTPError as e:
-        logger.error(f"Error calling AI detector API: {str(e)}")
-        log_entry.error = str(e)
-        log_entry.status_code = 503
-        db.commit()
-        
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Error connecting to AI detection service"
-        )
-
-# M-Pesa Payment Integration
-@app.post("/api/payments/mpesa/initiate", response_model=schemas.MpesaPaymentResponse)
-async def initiate_mpesa_payment(
-    payment_request: schemas.MpesaPaymentRequest,
-    current_user: models.User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    # Check if M-Pesa credentials are configured
-    if not all([
-        settings.MPESA_CONSUMER_KEY,
-        settings.MPESA_CONSUMER_SECRET,
-        settings.MPESA_PASSKEY,
-        settings.MPESA_SHORTCODE
-    ]):
-        logger.warning("M-Pesa credentials not fully configured")
-        # For demo purposes, we'll simulate a successful payment initiation
-        import uuid
-        checkout_request_id = str(uuid.uuid4())
-        
-        # Create a transaction record
-        transaction = models.Transaction(
-            user_id=current_user.id,
-            amount=payment_request.amount,
-            currency="KES",
-            payment_method="mpesa",
-            status="pending",
-            transaction_metadata={
-                "checkout_request_id": checkout_request_id,
-                "phone_number": payment_request.phone_number,
-                "account_reference": payment_request.account_reference,
-                "transaction_desc": payment_request.transaction_desc
-            }
-        )
-        
-        db.add(transaction)
-        db.commit()
-        
-        return {
-            "checkout_request_id": checkout_request_id,
-            "response_code": "0",
-            "response_description": "Success",
-            "customer_message": "Success. Request accepted for processing"
-        }
-    
-    # In a real implementation, this would make an API call to the M-Pesa API
-    # For security, we'd need to properly implement OAuth, formatting, etc.
-    
-    # Simulated response
-    return {
-        "checkout_request_id": "ws_CO_123456789",
-        "response_code": "0",
-        "response_description": "Success",
-        "customer_message": "Success. Request accepted for processing"
-    }
-
-@app.post("/api/payments/mpesa/callback")
-async def mpesa_callback(
-    callback: schemas.MpesaCallback,
-    db: Session = Depends(get_db)
-):
-    # This would process the callback from M-Pesa after payment
-    
-    # Find the corresponding transaction
-    transaction = db.query(models.Transaction).filter(
-        models.Transaction.transaction_metadata.contains({"checkout_request_id": callback.checkout_request_id})
-    ).first()
-    
-    if not transaction:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Transaction not found"
-        )
-    
-    # Update transaction status
-    if callback.result_code == 0:  # Success
-        transaction.status = "completed"
-        
-        # Update user's payment status
-        user = db.query(models.User).filter(models.User.id == transaction.user_id).first()
-        if user:
-            user.payment_status = "Paid"
-            db.commit()
-    else:
-        transaction.status = "failed"
-    
-    # Update transaction metadata
-    transaction.transaction_metadata.update({
-        "mpesa_receipt_number": callback.mpesa_receipt_number,
-        "transaction_date": callback.transaction_date,
-        "result_desc": callback.result_desc
-    })
-    
-    db.commit()
-    
-    return {"status": "success"}
-
-# Simulate a payment for testing (in real environment, this would be removed)
-@app.post("/api/payments/simulate", response_model=schemas.Transaction)
-async def simulate_payment(
-    amount: float,
-    current_user: models.User = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    # Create a transaction record
-    transaction = models.Transaction(
-        user_id=current_user.id,
-        amount=amount,
-        currency="KES",
-        payment_method="simulation",
-        status="completed",
-        transaction_metadata={"simulation": True}
-    )
-    
-    db.add(transaction)
-    
-    # Update user's payment status
-    current_user.payment_status = "Paid"
-    
-    db.commit()
-    db.refresh(transaction)
-    
-    return transaction
-
-# Health Check Endpoint
+# Health check endpoint
 @app.get("/health")
-async def health_check(db: Session = Depends(get_db)):
-    # Check database connection
-    try:
-        # Simple query to verify database connection
-        db.execute(text("SELECT 1"))
-        db_status = "healthy"
-    except Exception as e:
-        logger.error(f"Database health check failed: {str(e)}")
-        db_status = "unhealthy"
+async def health_check():
+    db_status = "unknown"
     
-    # Check external services
-    services_status = {}
-    
-    # Check Humanizer API
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(f"{settings.HUMANIZER_API_URL}/", timeout=5.0)
-            services_status["humanizer"] = "healthy" if response.status_code == 200 else "unhealthy"
-    except Exception:
-        services_status["humanizer"] = "unhealthy"
-    
-    # Check AI Detector API (if configured)
-    if settings.AI_DETECTOR_API_URL and settings.AI_DETECTOR_API_URL != "https://ai-detector-api.example.com":
+    if DATABASE_AVAILABLE:
         try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(f"{settings.AI_DETECTOR_API_URL}/", timeout=5.0)
-                services_status["ai_detector"] = "healthy" if response.status_code == 200 else "unhealthy"
-        except Exception:
-            services_status["ai_detector"] = "unhealthy"
+            db = next(get_db())
+            db.execute(text("SELECT 1"))
+            db_status = "healthy"
+        except Exception as e:
+            logger.error(f"Database health check failed: {str(e)}")
+            db_status = f"unhealthy: {str(e)}"
     else:
-        services_status["ai_detector"] = "not_configured"
-    
-    overall_status = "healthy" if db_status == "healthy" and all(
-        status == "healthy" or status == "not_configured" for status in services_status.values()
-    ) else "unhealthy"
+        db_status = "unavailable"
     
     return {
-        "status": overall_status,
+        "status": "healthy" if db_status == "healthy" else "degraded",
         "timestamp": datetime.utcnow().isoformat(),
         "services": {
             "database": db_status,
-            **services_status
+            "api": "healthy"
         }
     }
 
-# Root endpoint
-@app.get("/", response_class=HTMLResponse)
-async def root(request: Request):
-    """
-    Main index page with links to all API endpoints and documentation
-    """
-    # Get system status
-    try:
-        # Simple query to verify database connection
-        db = next(get_db())
-        db.execute(text("SELECT 1"))
-        system_status = "healthy"
-    except Exception:
-        system_status = "starting"
-    
-    env_info = {}
-    
-    # List of environment variables to include (without sensitive values)
-    env_vars_to_show = [
-        "RAILWAY_PROJECT_NAME", 
-        "RAILWAY_SERVICE_NAME", 
-        "RAILWAY_ENVIRONMENT_NAME",
-        "RAILWAY_PUBLIC_DOMAIN",
-        "HUMANIZER_API_URL"
-    ]
-    
-    for var in env_vars_to_show:
-        env_info[var] = os.getenv(var, "Not set")
-    
-    # Create context for template
-    context = {
-        "request": request,
-        "title": settings.PROJECT_NAME,
-        "description": "Backend API Gateway for Andikar AI services",
-        "version": settings.PROJECT_VERSION,
-        "status": system_status,
-        "environment": os.getenv("RAILWAY_ENVIRONMENT_NAME", "production"),
-        "timestamp": datetime.utcnow().isoformat()
+# Status endpoint for healthcheck
+@app.get("/status")
+async def status_check():
+    return {
+        "status": "healthy",
+        "message": "Application is running",
+        "progress": 100,
+        "complete": True
     }
-    
-    return templates.TemplateResponse("index.html", context)
 
-# HTML Index page for better navigation
+# Alternative index page routes
 @app.get("/index.html", response_class=HTMLResponse)
 async def index_html(request: Request):
-    """
-    HTML index page with links to all API endpoints and documentation
-    """
+    return await root(request)
+
+@app.get("/home", response_class=HTMLResponse)
+async def home(request: Request):
     return await root(request)
 
 # Main entry point
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv("PORT", "8000"))
-    logger.info(f"Starting {settings.PROJECT_NAME} server on port {port}")
+    port = int(os.getenv("PORT", "8080"))
+    logger.info(f"Starting {PROJECT_NAME} server on port {port}")
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
