@@ -2,9 +2,8 @@
 builder = "NIXPACKS"
 
 [deploy]
-startCommand = "python dual_app.py"
-healthcheckPath = "/health"
-healthcheckTimeout = 30
+startCommand = "bash start.sh"
+healthcheckPath = "/status"
+healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
-
-[environments]
+restartPolicyMaxRetries = 5
