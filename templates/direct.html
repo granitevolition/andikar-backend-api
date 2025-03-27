@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Direct HTML Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 1rem;
+        }
+        .success-box {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+            padding: 1rem;
+            border-radius: 0.25rem;
+            margin-bottom: 1rem;
+        }
+        .info-box {
+            background-color: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+            padding: 1rem;
+            border-radius: 0.25rem;
+            margin-bottom: 1rem;
+        }
+        .warning-box {
+            background-color: #fff3cd;
+            border: 1px solid #ffeeba;
+            color: #856404;
+            padding: 1rem;
+            border-radius: 0.25rem;
+            margin-bottom: 1rem;
+        }
+        .button {
+            display: inline-block;
+            background-color: #007bff;
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 0.25rem;
+            text-decoration: none;
+        }
+        .button:hover {
+            background-color: #0069d9;
+        }
+    </style>
+</head>
+<body>
+    <h1>Direct HTML Test Page</h1>
+    
+    <div class="success-box">
+        <h2>Success!</h2>
+        <p>If you're seeing this page, the direct HTML template is working.</p>
+    </div>
+    
+    <div class="info-box">
+        <h2>Admin Links</h2>
+        <p>Try accessing the admin pages directly:</p>
+        <ul>
+            <li><a href="/admin">Admin Dashboard</a></li>
+            <li><a href="/admin-dashboard">Alternative Admin Dashboard</a></li>
+            <li><a href="/admin-test">Admin Test Page</a></li>
+        </ul>
+    </div>
+    
+    <div class="warning-box">
+        <h2>Testing Other Pages</h2>
+        <p>You can also try these links:</p>
+        <ul>
+            <li><a href="/test-simple">Simple HTML Template Test</a></li>
+            <li><a href="/test">Jinja Template Test</a></li>
+            <li><a href="/info">System Information</a></li>
+            <li><a href="/status">Status Check</a></li>
+        </ul>
+    </div>
+    
+    <p>
+        <a href="/" class="button">Back to Home</a>
+    </p>
+</body>
+</html>
