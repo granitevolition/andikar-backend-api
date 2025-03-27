@@ -19,16 +19,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Make startup script executable with explicit permissions
-RUN chmod +x /app/start.sh && \
-    chmod 755 /app/start.sh && \
-    ls -la /app/start.sh
+# Make all Python files executable
+RUN find . -name "*.py" -exec chmod +x {} \; && \
+    chmod +x /app/start.sh && \
+    chmod 755 /app/start.sh /app/railway_entry.py /app/status_server.py
 
-# Create a simple status endpoint script as fallback
-RUN echo '#!/usr/bin/env python3\nfrom fastapi import FastAPI\nimport uvicorn\napp = FastAPI()\n@app.get("/status")\ndef status():\n    return {"status": "healthy"}\n\nif __name__ == "__main__":\n    uvicorn.run(app, host="0.0.0.0", port=8080)' > /app/status_server.py && \
-    chmod +x /app/status_server.py
-
-# Expose port 
+# Expose port
 ENV PORT=8080
 EXPOSE 8080
 
@@ -39,6 +35,5 @@ ENV PYTHONUNBUFFERED=1
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:${PORT}/status || exit 1
 
-# Add a CMD as fallback if ENTRYPOINT fails
-ENTRYPOINT ["bash", "/app/start.sh"]
-CMD ["python", "-m", "entrypoint"]
+# Run Python directly
+CMD ["python", "status_server.py"]
