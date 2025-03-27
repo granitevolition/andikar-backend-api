@@ -7,6 +7,8 @@
 set -e
 
 echo "========== ANDIKAR BACKEND API STARTUP =========="
+echo "Running as user: $(whoami)"
+echo "Current directory: $(pwd)"
 
 # Set up DATABASE_URL explicitly using environment variables or defaults
 echo "Setting up database connection..."
@@ -16,12 +18,17 @@ POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-ztJggTeesPJYVMHRWuGVbnUinMKwCWyI}
 RAILWAY_TCP_PROXY_DOMAIN=${RAILWAY_TCP_PROXY_DOMAIN:-ballast.proxy.rlwy.net}
 RAILWAY_TCP_PROXY_PORT=${RAILWAY_TCP_PROXY_PORT:-11148}
 
-# Always use the TCP proxy connection 
-export DATABASE_URL="postgresql://$PGUSER:$POSTGRES_PASSWORD@$RAILWAY_TCP_PROXY_DOMAIN:$RAILWAY_TCP_PROXY_PORT/$PGDATABASE"
+# Always use the TCP proxy connection - encode password for URL safety
+ENCODED_PASSWORD=$(echo -n "$POSTGRES_PASSWORD" | python -c "import sys, urllib.parse; print(urllib.parse.quote_plus(sys.stdin.read()))")
+export DATABASE_URL="postgresql://$PGUSER:$ENCODED_PASSWORD@$RAILWAY_TCP_PROXY_DOMAIN:$RAILWAY_TCP_PROXY_PORT/$PGDATABASE"
 echo "Database URL set to: postgresql://$PGUSER:****@$RAILWAY_TCP_PROXY_DOMAIN:$RAILWAY_TCP_PROXY_PORT/$PGDATABASE"
 
+# Display environment variables (excluding sensitive data)
+echo "Environment variables (excluding sensitive data):"
+env | grep -v PASSWORD | grep -v SECRET | grep -v KEY | grep -v TOKEN | sort
+
 # Run database diagnostic
-echo "Running database diagnostic..."
+echo "Running database diagnostic tool..."
 python db_diagnostic.py
 
 # Initialize the database - retry if it fails
