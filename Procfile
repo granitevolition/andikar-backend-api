@@ -1,1 +1,1 @@
-web: python dual_app.py
+web: python -m entrypoint
