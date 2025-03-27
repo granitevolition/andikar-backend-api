@@ -9,14 +9,14 @@ import psycopg2
 from psycopg2 import sql
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 
-# UPDATED CREDENTIALS FROM USER
-DB_USER = "postgres"
-DB_PASSWORD = "ztJggTeesPJYVMHRWuGVbnUinMKwCWyI"
-DB_NAME = "railway"
-DB_PORT = "5432"
-DB_HOST = "postgres.railway.internal"
-DB_PROXY_HOST = "ballast.proxy.rlwy.net"
-DB_PROXY_PORT = "11148"
+# Get database credentials from environment variables
+DB_USER = os.getenv("PGUSER", "postgres")
+DB_PASSWORD = os.getenv("POSTGRES_PASSWORD", "ztJggTeesPJYVMHRWuGVbnUinMKwCWyI")
+DB_NAME = os.getenv("PGDATABASE", "railway")
+DB_PORT = os.getenv("PGPORT", "5432")
+DB_HOST = os.getenv("PGHOST", "postgres.railway.internal")
+DB_PROXY_HOST = os.getenv("RAILWAY_TCP_PROXY_DOMAIN", "ballast.proxy.rlwy.net")
+DB_PROXY_PORT = os.getenv("RAILWAY_TCP_PROXY_PORT", "11148")
 
 # Connection strings
 DIRECT_CONN_STRING = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
