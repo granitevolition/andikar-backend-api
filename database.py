@@ -99,3 +99,97 @@ def get_db():
         yield db
     finally:
         db.close()
+
+def init_db():
+    """Initialize database with seed data.
+    
+    This function is called during application startup to ensure
+    that necessary tables and seed data exist in the database.
+    Returns True if successful, False otherwise.
+    """
+    try:
+        # Create all tables
+        Base.metadata.create_all(bind=engine)
+        
+        # Import models here to avoid circular imports
+        from models import User, PricingPlan
+        
+        # Create session for seeding
+        with SessionLocal() as db:
+            # Check if we need to create pricing plans
+            plan_count = db.query(PricingPlan).count()
+            if plan_count == 0:
+                logger.info("Creating default pricing plans...")
+                
+                # Create default pricing plans
+                plans = [
+                    PricingPlan(
+                        id="free",
+                        name="Free",
+                        description="Basic plan with limited usage",
+                        price=0.0,
+                        word_limit=1000,
+                        requests_per_day=10,
+                        features=["Basic text humanization"],
+                        is_active=True
+                    ),
+                    PricingPlan(
+                        id="basic",
+                        name="Basic",
+                        description="Standard plan for regular users",
+                        price=9.99,
+                        word_limit=10000,
+                        requests_per_day=100,
+                        features=["Advanced text humanization", "AI detection"],
+                        is_active=True
+                    ),
+                    PricingPlan(
+                        id="pro",
+                        name="Professional",
+                        description="Advanced plan for professional users",
+                        price=29.99,
+                        word_limit=50000,
+                        requests_per_day=500,
+                        features=["Premium text humanization", "Advanced AI detection", "Priority support"],
+                        is_active=True
+                    )
+                ]
+                
+                db.add_all(plans)
+                db.commit()
+                logger.info("Default pricing plans created")
+                
+            # Check if we need to create admin user
+            admin_user = db.query(User).filter(User.username == "admin").first()
+            if not admin_user:
+                logger.info("Creating admin user...")
+                
+                # Import bcrypt here to avoid circular imports
+                import bcrypt
+                
+                # Create admin user with default password
+                password = "admin123"
+                hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+                
+                admin = User(
+                    username="admin",
+                    email="admin@andikar.com",
+                    full_name="Admin User",
+                    hashed_password=hashed_password,
+                    plan_id="pro",
+                    words_used=0,
+                    payment_status="Paid",
+                    is_active=True
+                )
+                
+                db.add(admin)
+                db.commit()
+                logger.info("Admin user created")
+                
+        logger.info("Database initialization completed successfully")
+        return True
+    except Exception as e:
+        logger.error(f"Error initializing database: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return False
