@@ -1,9 +1,14 @@
 [build]
-builder = "NIXPACKS"
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "python -m app"
+startCommand = "/app/startup.sh"
 healthcheckPath = "/status"
 healthcheckTimeout = 10
 restartPolicyType = "ON_FAILURE"
-restartPolicyMaxRetries = 3
+restartPolicyMaxRetries = 5
+
+[vars]
+ENVIRONMENT = "production"
+DEBUG = "0"
