@@ -4,6 +4,7 @@ uvicorn==0.23.2
 pydantic==2.4.2
 pydantic-settings==2.0.3
 python-multipart==0.0.6
+jinja2==3.1.2
 
 # HTTP Client
 httpx==0.25.1
@@ -23,3 +24,5 @@ alembic==1.12.1
 python-dateutil==2.8.2
 pytz==2023.3
 email-validator==2.0.0
+aiofiles==23.1.0
+netaddr==0.8.0
