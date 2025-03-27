@@ -1,73 +1,66 @@
 #!/bin/bash
+# Railway startup script for Andikar Backend API
 
-# Andikar Backend API Startup Script
-# This script handles the startup process for the Andikar Backend API
-# It ensures proper environment setup and database initialization
+echo "Starting Andikar Backend API initialization..."
 
-set -e
+# Set default environment variables if not set
+export PORT=${PORT:-8080}
+export DEBUG=${DEBUG:-0}
+export SECRET_KEY=${SECRET_KEY:-"09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7"}
+export ADMIN_USERNAME=${ADMIN_USERNAME:-"admin"}
+export ADMIN_PASSWORD=${ADMIN_PASSWORD:-"adminpassword"}
+export ADMIN_EMAIL=${ADMIN_EMAIL:-"admin@example.com"}
 
-echo "Starting Andikar Backend API..."
-echo ""
-
-# Print non-sensitive environment variables
-echo "Environment variables:"
-printenv | grep -v PASSWORD | grep -v SECRET | grep -v KEY | sort
-
-# Wait for PostgreSQL to be ready (if using Railway PostgreSQL)
-if [[ -n "$DATABASE_URL" || -n "$DATABASE_PUBLIC_URL" ]]; then
-    echo "Checking database connection..."
+# Check if PostgreSQL is reachable via internal network
+echo "Checking if host postgres.railway.internal is reachable..."
+if nc -z -w 5 postgres.railway.internal 5432; then
+    echo "Host postgres.railway.internal is reachable!"
     
-    # Extract host and port
-    if [[ -n "$DATABASE_URL" ]]; then
-        DB_URL="$DATABASE_URL"
-    else
-        DB_URL="$DATABASE_PUBLIC_URL"
+    # Set DATABASE_URL if not already set
+    if [ -z "$DATABASE_URL" ]; then
+        export DATABASE_URL="postgresql://${PGUSER}:${POSTGRES_PASSWORD}@postgres.railway.internal:5432/${PGDATABASE}"
+        echo "Set DATABASE_URL using internal network"
     fi
+else
+    echo "Host postgres.railway.internal is not reachable!"
+    echo "Trying with DATABASE_PUBLIC_URL instead..."
     
-    # Parse the URL to extract host and port
-    if [[ "$DB_URL" =~ .*@([^:]+):([0-9]+)/([^?]+).* ]]; then
-        DB_HOST="${BASH_REMATCH[1]}"
-        DB_PORT="${BASH_REMATCH[2]}"
-        DB_NAME="${BASH_REMATCH[3]}"
-        
-        echo "Database details:"
-        echo "  - Host: $DB_HOST"
-        echo "  - Port: $DB_PORT"
-        echo "  - Database: $DB_NAME"
-        
-        # Try to connect using timeout to avoid hanging
-        echo "Waiting for database to be ready..."
-        
-        MAX_RETRIES=5
-        RETRY_COUNT=0
-        BACKOFF_TIME=2
-        
-        while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-            if nc -z -w 5 "$DB_HOST" "$DB_PORT"; then
-                echo "Database is ready!"
-                break
-            else
-                RETRY_COUNT=$((RETRY_COUNT+1))
-                if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
-                    echo "Warning: Could not connect to database after $MAX_RETRIES attempts."
-                    echo "Proceeding with application startup, but database features may not work."
-                    break
-                fi
-                
-                WAIT_TIME=$((BACKOFF_TIME ** RETRY_COUNT))
-                echo "Database not ready yet. Retrying in $WAIT_TIME seconds... (Attempt $RETRY_COUNT/$MAX_RETRIES)"
-                sleep $WAIT_TIME
-            fi
-        done
-    else
-        echo "Warning: Could not parse database URL. Will continue without database connection check."
+    # If DATABASE_PUBLIC_URL is not set but we have the necessary components, construct it
+    if [ -z "$DATABASE_PUBLIC_URL" ] && [ ! -z "$RAILWAY_TCP_PROXY_DOMAIN" ] && [ ! -z "$RAILWAY_TCP_PROXY_PORT" ]; then
+        export DATABASE_PUBLIC_URL="postgresql://${PGUSER}:${POSTGRES_PASSWORD}@${RAILWAY_TCP_PROXY_DOMAIN}:${RAILWAY_TCP_PROXY_PORT}/${PGDATABASE}"
+        echo "Constructed DATABASE_PUBLIC_URL from environment variables"
+    elif [ -z "$DATABASE_PUBLIC_URL" ]; then
+        echo "No DATABASE_PUBLIC_URL set, using SQLite fallback database..."
     fi
 fi
 
-# Create static and templates directories if they don't exist
-mkdir -p templates
-mkdir -p static
+# Print environment details (without sensitive info)
+echo "Environment Configuration:"
+echo "- RAILWAY_ENVIRONMENT: ${RAILWAY_ENVIRONMENT}"
+echo "- RAILWAY_PROJECT_ID: ${RAILWAY_PROJECT_ID}"
+echo "- RAILWAY_SERVICE_NAME: ${RAILWAY_SERVICE_NAME}"
+echo "- DATABASE_URL: [REDACTED]"
+echo "- DATABASE_PUBLIC_URL: [REDACTED]"
+echo "- PORT: ${PORT}"
+
+# Initialize database
+echo "Waiting for database to be ready..."
+python -c "
+import time
+import sys
+from database import init_db
+for attempt in range(5):
+    print(f'Database initialization attempt {attempt+1}/5...')
+    if init_db():
+        print('Database initialized successfully!')
+        sys.exit(0)
+    if attempt < 4:
+        print(f'Retrying in {2**attempt} seconds...')
+        time.sleep(2**attempt)
+print('Failed to initialize database after 5 attempts')
+# Continue anyway, app will use fallback mechanisms
+"
 
 # Start the application
-echo "Starting application on port ${PORT:-8080}..."
-exec python -m app
+echo "Starting application on port ${PORT}..."
+exec python app.py
