@@ -18,13 +18,27 @@ DB_HOST = os.getenv("PGHOST", "postgres.railway.internal")
 DB_PROXY_HOST = os.getenv("RAILWAY_TCP_PROXY_DOMAIN", "ballast.proxy.rlwy.net")
 DB_PROXY_PORT = os.getenv("RAILWAY_TCP_PROXY_PORT", "11148")
 
-# Connection strings - prioritize proxy connection
+# Get the exact DATABASE_URL from environment
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+# Connection strings - prioritize the exact DATABASE_URL
+if DATABASE_URL:
+    if DATABASE_URL.startswith("postgres:"):
+        DATABASE_URL = DATABASE_URL.replace("postgres:", "postgresql:")
+    EXACT_CONN_STRING = DATABASE_URL
+else:
+    EXACT_CONN_STRING = None
+
+# Backup connection strings
 PROXY_CONN_STRING = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_PROXY_HOST}:{DB_PROXY_PORT}/{DB_NAME}"
 DIRECT_CONN_STRING = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
 def try_connect(connection_string, name="Database", print_details=True):
     """Try to connect to PostgreSQL using the given connection string."""
-    masked_conn_string = connection_string.replace(DB_PASSWORD, "****")
+    masked_conn_string = connection_string
+    if DB_PASSWORD in masked_conn_string:
+        masked_conn_string = masked_conn_string.replace(DB_PASSWORD, "****")
+    
     try:
         print(f"Attempting to connect to {name} with: {masked_conn_string}")
         
@@ -265,12 +279,17 @@ def main():
     print()
     
     # Try different connection methods in order of preference
-    # Try proxy connection first (most reliable in Railway environment)
-    connections_to_try = [
+    connections_to_try = []
+    
+    # Try exact DATABASE_URL first if available
+    if EXACT_CONN_STRING:
+        connections_to_try.append((EXACT_CONN_STRING, "DATABASE_URL (exact)"))
+    
+    # Then try proxy and direct connections as fallbacks
+    connections_to_try.extend([
         (PROXY_CONN_STRING, "Railway Proxy connection"),
-        (DIRECT_CONN_STRING, "Direct internal connection"),
-        (os.getenv("DATABASE_URL", PROXY_CONN_STRING), "DATABASE_URL"),
-    ]
+        (DIRECT_CONN_STRING, "Direct internal connection")
+    ])
     
     connection = None
     for conn_string, name in connections_to_try:
