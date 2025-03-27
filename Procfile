@@ -1,1 +1,1 @@
-web: python -m entrypoint
+web: python -m app
