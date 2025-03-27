@@ -1,0 +1,88 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Create User - Andikar Admin{% endblock %}
+
+{% block header %}Create New User{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="card">
+            <div class="card-header">
+                <i class="fas fa-user-plus me-2"></i> New User Information
+            </div>
+            <div class="card-body">
+                <form action="/admin/users/create" method="post">
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Username <span class="text-danger">*</span></label>
+                            <input type="text" name="username" class="form-control" required>
+                            <div class="form-text">Must be unique</div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Email <span class="text-danger">*</span></label>
+                            <input type="email" name="email" class="form-control" required>
+                            <div class="form-text">Must be unique</div>
+                        </div>
+                    </div>
+                    
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Password <span class="text-danger">*</span></label>
+                            <input type="password" name="password" class="form-control" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Full Name</label>
+                            <input type="text" name="full_name" class="form-control">
+                        </div>
+                    </div>
+                    
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Plan</label>
+                            <select name="plan_id" class="form-select">
+                                {% for plan in plans %}
+                                <option value="{{ plan.id }}" {% if plan.id == 'free' %}selected{% endif %}>
+                                    {{ plan.name }} ({{ plan.price }} {{ plan.currency }})
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Payment Status</label>
+                            <select name="payment_status" class="form-select">
+                                <option value="Pending" selected>Pending</option>
+                                <option value="Paid">Paid</option>
+                                <option value="Failed">Failed</option>
+                                <option value="Cancelled">Cancelled</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Words Used</label>
+                            <input type="number" name="words_used" class="form-control" value="0" min="0">
+                        </div>
+                        <div class="col-md-6 d-flex align-items-center">
+                            <div class="form-check mt-4">
+                                <input type="checkbox" class="form-check-input" id="is_active" name="is_active" checked>
+                                <label class="form-check-label" for="is_active">Active Account</label>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="d-flex justify-content-between mt-4">
+                        <a href="/admin/users" class="btn btn-secondary">
+                            <i class="fas fa-arrow-left me-2"></i> Back to Users
+                        </a>
+                        <button type="submit" class="btn btn-success">
+                            <i class="fas fa-user-plus me-2"></i> Create User
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
