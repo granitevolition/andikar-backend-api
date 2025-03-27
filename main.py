@@ -1,9 +1,8 @@
 from fastapi import FastAPI, HTTPException, Depends, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.security import OAuth2PasswordRequestForm
 from typing import Dict, List, Optional, Any, Union
 import httpx
 import os
@@ -18,6 +17,20 @@ import traceback
 
 # Import configuration
 from config import settings
+
+# Import database and models
+from database import get_db, engine
+import models
+from models import Base
+import schemas
+from utils import detect_ai_content
+
+# Import authentication utilities
+from auth import (
+    verify_password, get_password_hash, authenticate_user,
+    create_access_token, get_current_user, get_current_active_user,
+    oauth2_scheme, pwd_context
+)
 
 # Set up logging
 logging.basicConfig(
@@ -40,42 +53,6 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-)
-
-# Simple health check that doesn't depend on database
-@app.get("/health")
-async def health_check():
-    return {
-        "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat(),
-    }
-
-# Root endpoint
-@app.get("/")
-async def root():
-    return {
-        "name": settings.PROJECT_NAME,
-        "version": settings.PROJECT_VERSION,
-        "description": "Backend API Gateway for Andikar AI services",
-        "status": "up and running",
-        "timestamp": datetime.utcnow().isoformat(),
-        "documentation": "/docs",
-        "health_check": "/health"
-    }
-
-# Import other modules after FastAPI app is created
-# This ensures the app object is available and avoids circular imports
-from database import get_db, engine
-import models
-from models import Base
-import schemas
-from utils import detect_ai_content
-
-# Import authentication utilities
-from auth import (
-    verify_password, get_password_hash, authenticate_user,
-    create_access_token, get_current_user, get_current_active_user,
-    oauth2_scheme, pwd_context
 )
 
 # Create templates directory if it doesn't exist
@@ -110,7 +87,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 # Rate Limiting Middleware
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
-    if request.url.path in ["/docs", "/redoc", "/openapi.json", "/", "/health"] or request.url.path.startswith("/admin") or request.url.path.startswith("/static"):
+    if request.url.path in ["/docs", "/redoc", "/openapi.json", "/", "/health", "/index.html"] or request.url.path.startswith("/admin") or request.url.path.startswith("/static"):
         return await call_next(request)
     
     try:
@@ -224,12 +201,242 @@ async def startup_db_client():
         logger.info("Database initialized successfully")
         
         # Import and include admin routes after app creation to avoid circular imports
-        try:
-            from admin import admin_router
-            app.include_router(admin_router)
-            logger.info("Admin routes registered")
-        except ImportError as e:
-            logger.warning(f"Could not import admin routes: {str(e)}")
+        from admin import admin_router
+        app.include_router(admin_router)
+        logger.info("Admin routes registered")
+        
+        # Create index.html template if it doesn't exist
+        os.makedirs("templates", exist_ok=True)
+        index_template_path = os.path.join("templates", "index.html")
+        if not os.path.exists(index_template_path):
+            with open(index_template_path, "w") as f:
+                f.write("""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f8f9fa;
+            padding-top: 2rem;
+            padding-bottom: 2rem;
+        }
+        .card {
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 2rem;
+            border: none;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
+        }
+        .card-header {
+            background-color: #343a40;
+            color: white;
+            border-bottom: none;
+            font-weight: bold;
+        }
+        .list-group-item {
+            padding: 1rem;
+            border: none;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.125);
+        }
+        .list-group-item:last-child {
+            border-bottom: none;
+        }
+        .list-group-item a {
+            color: #0d6efd;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+        }
+        .list-group-item a:hover {
+            color: #0a58ca;
+        }
+        .list-group-item a i {
+            margin-right: 10px;
+            width: 20px;
+        }
+        .header {
+            background-color: #343a40;
+            color: white;
+            padding: 3rem 0;
+            margin-bottom: 2rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .header h1 {
+            margin-bottom: 0.5rem;
+        }
+        .header p {
+            opacity: 0.8;
+            margin-bottom: 0;
+            font-size: 1.1rem;
+        }
+        .api-status {
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            display: inline-block;
+            margin-left: 1rem;
+            font-size: 0.9rem;
+        }
+        .status-running {
+            background-color: #28a745;
+            color: white;
+        }
+        .status-starting {
+            background-color: #ffc107;
+            color: #343a40;
+        }
+        .status-error {
+            background-color: #dc3545;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header text-center">
+            <h1>{{ title }} 
+                <span class="api-status {% if status == 'healthy' %}status-running{% elif status == 'starting' %}status-starting{% else %}status-error{% endif %}">
+                    {{ status }}
+                </span>
+            </h1>
+            <p class="lead">{{ description }}</p>
+            <p>Version: {{ version }} | Environment: {{ environment }}</p>
+        </div>
+        
+        <div class="row">
+            <!-- API Documentation -->
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-book me-2"></i> Documentation & Status
+                    </div>
+                    <div class="list-group list-group-flush">
+                        <div class="list-group-item">
+                            <a href="/docs" target="_blank">
+                                <i class="fas fa-file-code"></i> API Documentation (Swagger UI)
+                            </a>
+                            <div class="mt-2 small text-muted">Interactive API documentation with testing capabilities</div>
+                        </div>
+                        <div class="list-group-item">
+                            <a href="/redoc" target="_blank">
+                                <i class="fas fa-book"></i> Alternative API Documentation (ReDoc)
+                            </a>
+                            <div class="mt-2 small text-muted">More readable version of the API documentation</div>
+                        </div>
+                        <div class="list-group-item">
+                            <a href="/health" target="_blank">
+                                <i class="fas fa-heartbeat"></i> System Health Status
+                            </a>
+                            <div class="mt-2 small text-muted">Check the current status of all system components</div>
+                        </div>
+                        <div class="list-group-item">
+                            <a href="/openapi.json" target="_blank">
+                                <i class="fas fa-code"></i> OpenAPI Schema (JSON)
+                            </a>
+                            <div class="mt-2 small text-muted">Raw OpenAPI specification for the API</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Admin Dashboard -->
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-tachometer-alt me-2"></i> Admin Dashboard
+                    </div>
+                    <div class="list-group list-group-flush">
+                        <div class="list-group-item">
+                            <a href="/admin" target="_blank">
+                                <i class="fas fa-tachometer-alt"></i> Dashboard Overview
+                            </a>
+                            <div class="mt-2 small text-muted">Main dashboard with key metrics and system status</div>
+                        </div>
+                        <div class="list-group-item">
+                            <a href="/admin/users" target="_blank">
+                                <i class="fas fa-users"></i> User Management
+                            </a>
+                            <div class="mt-2 small text-muted">View and manage user accounts and permissions</div>
+                        </div>
+                        <div class="list-group-item">
+                            <a href="/admin/transactions" target="_blank">
+                                <i class="fas fa-money-bill-wave"></i> Transaction Management
+                            </a>
+                            <div class="mt-2 small text-muted">Monitor payments and financial transactions</div>
+                        </div>
+                        <div class="list-group-item">
+                            <a href="/admin/logs" target="_blank">
+                                <i class="fas fa-file-alt"></i> API Logs
+                            </a>
+                            <div class="mt-2 small text-muted">View API usage logs and performance metrics</div>
+                        </div>
+                        <div class="list-group-item">
+                            <a href="/admin/settings" target="_blank">
+                                <i class="fas fa-cogs"></i> System Settings
+                            </a>
+                            <div class="mt-2 small text-muted">Configure pricing plans and system settings</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- API Endpoints -->
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-plug me-2"></i> Main API Endpoints
+                    </div>
+                    <div class="list-group list-group-flush">
+                        <div class="list-group-item">
+                            <strong><i class="fas fa-key me-2"></i> Authentication:</strong>
+                            <ul class="mt-2">
+                                <li><code>POST /token</code> - Get JWT access token for authentication</li>
+                                <li><code>POST /users/register</code> - Register a new user account</li>
+                                <li><code>GET /users/me</code> - Get current user profile information</li>
+                                <li><code>PUT /users/me</code> - Update user profile information</li>
+                            </ul>
+                        </div>
+                        <div class="list-group-item">
+                            <strong><i class="fas fa-magic me-2"></i> Text Services:</strong>
+                            <ul class="mt-2">
+                                <li><code>POST /api/humanize</code> - Humanize AI-generated text</li>
+                                <li><code>POST /api/detect</code> - Detect AI-generated content</li>
+                            </ul>
+                        </div>
+                        <div class="list-group-item">
+                            <strong><i class="fas fa-credit-card me-2"></i> Payment Processing:</strong>
+                            <ul class="mt-2">
+                                <li><code>POST /api/payments/mpesa/initiate</code> - Initiate M-Pesa payment</li>
+                                <li><code>POST /api/payments/mpesa/callback</code> - M-Pesa payment callback endpoint</li>
+                                <li><code>POST /api/payments/simulate</code> - Simulate a payment (testing only)</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="text-center mt-4 mb-5">
+            <p class="text-muted">
+                &copy; 2025 Andikar AI | Deployed on <a href="https://railway.app" target="_blank">Railway</a>
+                <br>
+                <small>API Last Updated: {{ timestamp }}</small>
+            </p>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>""")
+            logger.info("Created index.html template")
     except Exception as e:
         logger.error(f"Error initializing database: {str(e)}")
         logger.error(traceback.format_exc())
@@ -308,7 +515,7 @@ async def update_user(
     db: Session = Depends(get_db)
 ):
     # Update user fields
-    user_data = user_update.model_dump(exclude_unset=True)  # model_dump instead of dict in Pydantic v2
+    user_data = user_update.model_dump(exclude_unset=True)
     
     if user_data:
         for key, value in user_data.items():
@@ -318,34 +525,6 @@ async def update_user(
         db.refresh(current_user)
     
     return current_user
-
-# Initialize database
-@app.post("/api/init-db")
-async def init_db():
-    """
-    Initialize the database (admin-only endpoint for manual initialization)
-    """
-    try:
-        # Run database initialization
-        import subprocess
-        import sys
-        
-        result = subprocess.run([sys.executable, "init_db.py"], 
-                              capture_output=True, 
-                              text=True)
-        
-        return {
-            "success": True,
-            "message": "Database initialized successfully",
-            "details": result.stdout
-        }
-    except Exception as e:
-        logger.error(f"Database initialization failed: {str(e)}")
-        return {
-            "success": False,
-            "message": "Database initialization failed",
-            "error": str(e)
-        }
 
 # API Gateway Endpoints for External Services
 @app.post("/api/humanize", response_model=schemas.TextResponse)
@@ -573,6 +752,226 @@ async def detect_ai_content_api(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Error connecting to AI detection service"
         )
+
+# M-Pesa Payment Integration
+@app.post("/api/payments/mpesa/initiate", response_model=schemas.MpesaPaymentResponse)
+async def initiate_mpesa_payment(
+    payment_request: schemas.MpesaPaymentRequest,
+    current_user: models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    # Check if M-Pesa credentials are configured
+    if not all([
+        settings.MPESA_CONSUMER_KEY,
+        settings.MPESA_CONSUMER_SECRET,
+        settings.MPESA_PASSKEY,
+        settings.MPESA_SHORTCODE
+    ]):
+        logger.warning("M-Pesa credentials not fully configured")
+        # For demo purposes, we'll simulate a successful payment initiation
+        import uuid
+        checkout_request_id = str(uuid.uuid4())
+        
+        # Create a transaction record
+        transaction = models.Transaction(
+            user_id=current_user.id,
+            amount=payment_request.amount,
+            currency="KES",
+            payment_method="mpesa",
+            status="pending",
+            transaction_metadata={
+                "checkout_request_id": checkout_request_id,
+                "phone_number": payment_request.phone_number,
+                "account_reference": payment_request.account_reference,
+                "transaction_desc": payment_request.transaction_desc
+            }
+        )
+        
+        db.add(transaction)
+        db.commit()
+        
+        return {
+            "checkout_request_id": checkout_request_id,
+            "response_code": "0",
+            "response_description": "Success",
+            "customer_message": "Success. Request accepted for processing"
+        }
+    
+    # In a real implementation, this would make an API call to the M-Pesa API
+    # For security, we'd need to properly implement OAuth, formatting, etc.
+    
+    # Simulated response
+    return {
+        "checkout_request_id": "ws_CO_123456789",
+        "response_code": "0",
+        "response_description": "Success",
+        "customer_message": "Success. Request accepted for processing"
+    }
+
+@app.post("/api/payments/mpesa/callback")
+async def mpesa_callback(
+    callback: schemas.MpesaCallback,
+    db: Session = Depends(get_db)
+):
+    # This would process the callback from M-Pesa after payment
+    
+    # Find the corresponding transaction
+    transaction = db.query(models.Transaction).filter(
+        models.Transaction.transaction_metadata.contains({"checkout_request_id": callback.checkout_request_id})
+    ).first()
+    
+    if not transaction:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Transaction not found"
+        )
+    
+    # Update transaction status
+    if callback.result_code == 0:  # Success
+        transaction.status = "completed"
+        
+        # Update user's payment status
+        user = db.query(models.User).filter(models.User.id == transaction.user_id).first()
+        if user:
+            user.payment_status = "Paid"
+            db.commit()
+    else:
+        transaction.status = "failed"
+    
+    # Update transaction metadata
+    transaction.transaction_metadata.update({
+        "mpesa_receipt_number": callback.mpesa_receipt_number,
+        "transaction_date": callback.transaction_date,
+        "result_desc": callback.result_desc
+    })
+    
+    db.commit()
+    
+    return {"status": "success"}
+
+# Simulate a payment for testing (in real environment, this would be removed)
+@app.post("/api/payments/simulate", response_model=schemas.Transaction)
+async def simulate_payment(
+    amount: float,
+    current_user: models.User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    # Create a transaction record
+    transaction = models.Transaction(
+        user_id=current_user.id,
+        amount=amount,
+        currency="KES",
+        payment_method="simulation",
+        status="completed",
+        transaction_metadata={"simulation": True}
+    )
+    
+    db.add(transaction)
+    
+    # Update user's payment status
+    current_user.payment_status = "Paid"
+    
+    db.commit()
+    db.refresh(transaction)
+    
+    return transaction
+
+# Health Check Endpoint
+@app.get("/health")
+async def health_check(db: Session = Depends(get_db)):
+    # Check database connection
+    try:
+        # Simple query to verify database connection
+        db.execute(text("SELECT 1"))
+        db_status = "healthy"
+    except Exception as e:
+        logger.error(f"Database health check failed: {str(e)}")
+        db_status = "unhealthy"
+    
+    # Check external services
+    services_status = {}
+    
+    # Check Humanizer API
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{settings.HUMANIZER_API_URL}/", timeout=5.0)
+            services_status["humanizer"] = "healthy" if response.status_code == 200 else "unhealthy"
+    except Exception:
+        services_status["humanizer"] = "unhealthy"
+    
+    # Check AI Detector API (if configured)
+    if settings.AI_DETECTOR_API_URL and settings.AI_DETECTOR_API_URL != "https://ai-detector-api.example.com":
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(f"{settings.AI_DETECTOR_API_URL}/", timeout=5.0)
+                services_status["ai_detector"] = "healthy" if response.status_code == 200 else "unhealthy"
+        except Exception:
+            services_status["ai_detector"] = "unhealthy"
+    else:
+        services_status["ai_detector"] = "not_configured"
+    
+    overall_status = "healthy" if db_status == "healthy" and all(
+        status == "healthy" or status == "not_configured" for status in services_status.values()
+    ) else "unhealthy"
+    
+    return {
+        "status": overall_status,
+        "timestamp": datetime.utcnow().isoformat(),
+        "services": {
+            "database": db_status,
+            **services_status
+        }
+    }
+
+# Root endpoint
+@app.get("/", response_class=HTMLResponse)
+async def root(request: Request):
+    """
+    Main index page with links to all API endpoints and documentation
+    """
+    # Get system status
+    try:
+        # Simple query to verify database connection
+        db = next(get_db())
+        db.execute(text("SELECT 1"))
+        system_status = "healthy"
+    except Exception:
+        system_status = "starting"
+    
+    env_info = {}
+    
+    # List of environment variables to include (without sensitive values)
+    env_vars_to_show = [
+        "RAILWAY_PROJECT_NAME", 
+        "RAILWAY_SERVICE_NAME", 
+        "RAILWAY_ENVIRONMENT_NAME",
+        "RAILWAY_PUBLIC_DOMAIN",
+        "HUMANIZER_API_URL"
+    ]
+    
+    for var in env_vars_to_show:
+        env_info[var] = os.getenv(var, "Not set")
+    
+    # Create context for template
+    context = {
+        "request": request,
+        "title": settings.PROJECT_NAME,
+        "description": "Backend API Gateway for Andikar AI services",
+        "version": settings.PROJECT_VERSION,
+        "status": system_status,
+        "environment": os.getenv("RAILWAY_ENVIRONMENT_NAME", "production"),
+        "timestamp": datetime.utcnow().isoformat()
+    }
+    
+    return templates.TemplateResponse("index.html", context)
+
+# HTML Index page for better navigation
+@app.get("/index.html", response_class=HTMLResponse)
+async def index_html(request: Request):
+    """
+    HTML index page with links to all API endpoints and documentation
+    """
+    return await root(request)
 
 # Main entry point
 if __name__ == "__main__":
