@@ -88,9 +88,16 @@ async def root(request: Request):
                 border-radius: 0.25rem;
                 text-decoration: none;
                 margin-right: 0.5rem;
+                margin-bottom: 0.5rem;
+            }}
+            .btn-secondary {{
+                background-color: #6c757d;
             }}
             .btn:hover {{
                 background-color: #0a58ca;
+            }}
+            .btn-secondary:hover {{
+                background-color: #5a6268;
             }}
         </style>
     </head>
@@ -99,7 +106,7 @@ async def root(request: Request):
         <p>This server is used to test the admin dashboard templates.</p>
         
         <div class="card">
-            <h2>Available Test Pages</h2>
+            <h2>Admin Dashboard Pages</h2>
             <p>
                 <a href="/admin" class="btn">Admin Dashboard</a>
                 <a href="/admin-dashboard" class="btn">Alternative Admin Dashboard</a>
@@ -108,6 +115,15 @@ async def root(request: Request):
                 <a href="/admin-logs" class="btn">API Logs</a>
                 <a href="/admin-settings" class="btn">Settings</a>
             </p>
+        </div>
+        
+        <div class="card">
+            <h2>Basic Template Tests</h2>
+            <p>
+                <a href="/test" class="btn btn-secondary">Basic Template Test</a>
+                <a href="/test-simple" class="btn btn-secondary">Simple HTML Template</a>
+            </p>
+            <p>These tests use simple templates to verify that template rendering is working.</p>
         </div>
         
         <div class="card">
@@ -121,6 +137,141 @@ async def root(request: Request):
     </body>
     </html>
     """)
+
+@app.get("/test", response_class=HTMLResponse)
+async def test_template(request: Request):
+    """Test the basic template rendering."""
+    if not templates:
+        return HTMLResponse("<h1>Error: Templates not configured</h1>")
+    
+    try:
+        context = {
+            "request": request,
+            "title": "Test Template",
+            "server": "Andikar Admin Test Server",
+            "environment": os.getenv("RAILWAY_ENVIRONMENT_NAME", "development"),
+            "now": datetime.utcnow(),
+            "context": {
+                "test_var": "This is a test variable",
+                "request_path": request.url.path,
+                "template_dir": templates.directory if templates else "None"
+            }
+        }
+        
+        logger.info(f"Rendering test template with context: {context}")
+        return templates.TemplateResponse("test.html", context)
+    except Exception as e:
+        logger.error(f"Error rendering test template: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return HTMLResponse(f"""
+        <h1>Error rendering test template</h1>
+        <p>The test template could not be rendered due to an error:</p>
+        <pre style="background: #f8d7da; padding: 1rem; border-radius: 0.25rem;">{e}</pre>
+        <h2>Traceback</h2>
+        <pre style="background: #f8f9fa; padding: 1rem; border-radius: 0.25rem; overflow: auto;">{traceback.format_exc()}</pre>
+        """)
+
+@app.get("/test-simple", response_class=HTMLResponse)
+async def test_simple():
+    """Test with a simple HTML response for debugging."""
+    try:
+        # Check if templates directory exists
+        templates_exists = os.path.exists("templates")
+        templates_contents = os.listdir("templates") if templates_exists else []
+        
+        # Check if admin templates directory exists
+        admin_templates_exists = os.path.exists("templates/admin")
+        admin_templates_contents = os.listdir("templates/admin") if admin_templates_exists else []
+        
+        # Check if test.html exists
+        test_html_exists = os.path.exists("templates/test.html")
+        test_html_content = ""
+        if test_html_exists:
+            with open("templates/test.html", "r") as f:
+                test_html_content = f.read()[:200] + "..." if len(f.read()) > 200 else f.read()
+        
+        # List all available directories
+        available_dirs = os.listdir(".")
+        
+        return HTMLResponse(f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Simple Template Test</title>
+            <style>
+                body {{
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+                    max-width: 800px;
+                    margin: 0 auto;
+                    padding: 1rem;
+                }}
+                .success {{
+                    background-color: #d4edda;
+                    border: 1px solid #c3e6cb;
+                    color: #155724;
+                    padding: 1rem;
+                    border-radius: 0.25rem;
+                    margin-bottom: 1rem;
+                }}
+                .error {{
+                    background-color: #f8d7da;
+                    border: 1px solid #f5c6cb;
+                    color: #721c24;
+                    padding: 1rem;
+                    border-radius: 0.25rem;
+                    margin-bottom: 1rem;
+                }}
+                pre {{
+                    background-color: #f8f9fa;
+                    padding: 1rem;
+                    border-radius: 0.25rem;
+                    overflow: auto;
+                }}
+            </style>
+        </head>
+        <body>
+            <h1>Simple Template Test</h1>
+            
+            <div class="success">
+                <p><strong>Success!</strong> This is a simple HTML response without using templates.</p>
+            </div>
+            
+            <h2>Templates Directory</h2>
+            <div class="{("success" if templates_exists else "error")}">
+                <p>Templates directory exists: {templates_exists}</p>
+                {(f"<p>Contents: {templates_contents}</p>" if templates_exists else "")}
+            </div>
+            
+            <h2>Admin Templates</h2>
+            <div class="{("success" if admin_templates_exists else "error")}">
+                <p>Admin templates directory exists: {admin_templates_exists}</p>
+                {(f"<p>Contents: {admin_templates_contents}</p>" if admin_templates_exists else "")}
+            </div>
+            
+            <h2>Test Template</h2>
+            <div class="{("success" if test_html_exists else "error")}">
+                <p>test.html exists: {test_html_exists}</p>
+                {(f"<p>Content preview:</p><pre>{test_html_content}</pre>" if test_html_exists else "")}
+            </div>
+            
+            <h2>Available Directories</h2>
+            <pre>{available_dirs}</pre>
+            
+            <p><a href="/">Back to Home</a></p>
+        </body>
+        </html>
+        """)
+    except Exception as e:
+        import traceback
+        return HTMLResponse(f"""
+        <h1>Error in simple test</h1>
+        <p>Error: {e}</p>
+        <pre>{traceback.format_exc()}</pre>
+        <p><a href="/">Back to Home</a></p>
+        """)
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_main(request: Request):
@@ -374,6 +525,16 @@ async def debug():
         }
     else:
         debug_info["static_dir"] = {"exists": False}
+    
+    # Get environment variables (excluding sensitive ones)
+    env_vars = {}
+    for key, value in os.environ.items():
+        if any(sensitive in key.lower() for sensitive in ['secret', 'password', 'token', 'key']):
+            env_vars[key] = '********'
+        else:
+            env_vars[key] = value
+    
+    debug_info["environment_variables"] = env_vars
     
     return debug_info
 
