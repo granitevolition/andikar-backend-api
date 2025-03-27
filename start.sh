@@ -7,10 +7,8 @@
 set -e
 
 echo "========== ANDIKAR BACKEND API STARTUP =========="
-echo "Environment variables (excluding sensitive data):"
-printenv | grep -v PASSWORD | grep -v SECRET | grep -v KEY | sort
 
-# Set up DATABASE_URL explicitly
+# Set up DATABASE_URL explicitly using environment variables or defaults
 echo "Setting up database connection..."
 PGUSER=${PGUSER:-postgres}
 PGDATABASE=${PGDATABASE:-railway}
@@ -22,8 +20,12 @@ RAILWAY_TCP_PROXY_PORT=${RAILWAY_TCP_PROXY_PORT:-11148}
 export DATABASE_URL="postgresql://$PGUSER:$POSTGRES_PASSWORD@$RAILWAY_TCP_PROXY_DOMAIN:$RAILWAY_TCP_PROXY_PORT/$PGDATABASE"
 echo "Database URL set to: postgresql://$PGUSER:****@$RAILWAY_TCP_PROXY_DOMAIN:$RAILWAY_TCP_PROXY_PORT/$PGDATABASE"
 
+# Run database diagnostic
+echo "Running database diagnostic..."
+python db_diagnostic.py
+
 # Initialize the database - retry if it fails
-max_attempts=5
+max_attempts=3
 attempt=1
 while [ $attempt -le $max_attempts ]; do
     echo "Database initialization attempt $attempt/$max_attempts..."
