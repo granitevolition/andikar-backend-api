@@ -25,8 +25,9 @@ def check_host_connectivity(host, port, timeout=3):
     try:
         socket.setdefaulttimeout(timeout)
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect((host, port))
+        s.connect((host, int(port)))
         s.close()
+        logger.info(f"✅ Host {host}:{port} is reachable")
         return True
     except Exception as e:
         logger.warning(f"Host {host}:{port} is not reachable: {str(e)}")
@@ -35,9 +36,11 @@ def check_host_connectivity(host, port, timeout=3):
 def get_database_url():
     """
     Determine the most appropriate database URL to use.
-    Tries multiple approaches based on Railway's deployment model.
+    Prioritizes proxy connection to ensure PostgreSQL is used.
     """
-    # Railway PostgreSQL credentials from environment variables
+    # Get all possible connection parameters
+    database_url = os.getenv("DATABASE_URL")
+    database_public_url = os.getenv("DATABASE_PUBLIC_URL")
     pg_user = os.getenv("PGUSER", "postgres")
     pg_password = os.getenv("POSTGRES_PASSWORD", "ztJggTeesPJYVMHRWuGVbnUinMKwCWyI")
     pg_db = os.getenv("PGDATABASE", "railway")
@@ -46,29 +49,39 @@ def get_database_url():
     proxy_domain = os.getenv("RAILWAY_TCP_PROXY_DOMAIN", "ballast.proxy.rlwy.net")
     proxy_port = os.getenv("RAILWAY_TCP_PROXY_PORT", "11148")
     
-    # Option 1: Direct connection to postgres.railway.internal
-    if check_host_connectivity(pg_host, int(pg_port)):
-        logger.info(f"Connected to {pg_host}:{pg_port} successfully")
-        database_url = f"postgresql://{pg_user}:{pg_password}@{pg_host}:{pg_port}/{pg_db}"
-        return database_url
-    
-    # Option 2: Use DATABASE_URL from environment
-    database_url = os.getenv("DATABASE_URL")
-    if database_url:
-        if "postgres:" in database_url:
-            database_url = database_url.replace("postgres:", "postgresql:")
-        logger.info(f"Using DATABASE_URL from environment variable")
-        return database_url
-    
-    # Option 3: Try TCP proxy via public URL
+    # Priority 1: Try proxy connection first (most reliable)
+    proxy_conn_string = f"postgresql://{pg_user}:{pg_password}@{proxy_domain}:{proxy_port}/{pg_db}"
     if proxy_domain and proxy_port:
-        logger.info(f"Using TCP proxy at {proxy_domain}:{proxy_port}")
-        database_url = f"postgresql://{pg_user}:{pg_password}@{proxy_domain}:{proxy_port}/{pg_db}"
+        if check_host_connectivity(proxy_domain, proxy_port):
+            logger.info(f"Using TCP proxy connection: postgresql://{pg_user}:****@{proxy_domain}:{proxy_port}/{pg_db}")
+            return proxy_conn_string
+        else:
+            logger.warning(f"Proxy connection to {proxy_domain}:{proxy_port} failed")
+    
+    # Priority 2: Try DATABASE_URL or DATABASE_PUBLIC_URL
+    if database_url:
+        logger.info("Using DATABASE_URL from environment variable")
+        # Ensure it's using postgresql:// protocol
+        if database_url.startswith("postgres:"):
+            database_url = database_url.replace("postgres:", "postgresql:")
         return database_url
     
-    # Option 4: SQLite fallback
-    logger.warning("No PostgreSQL connection configuration found, using SQLite fallback")
-    return "sqlite:///./andikar.db"
+    if database_public_url:
+        logger.info("Using DATABASE_PUBLIC_URL from environment variable")
+        if database_public_url.startswith("postgres:"):
+            database_public_url = database_public_url.replace("postgres:", "postgresql:")
+        return database_public_url
+    
+    # Priority 3: Try direct internal connection
+    direct_conn_string = f"postgresql://{pg_user}:{pg_password}@{pg_host}:{pg_port}/{pg_db}"
+    if check_host_connectivity(pg_host, pg_port):
+        logger.info(f"Using direct internal connection: postgresql://{pg_user}:****@{pg_host}:{pg_port}/{pg_db}")
+        return direct_conn_string
+    
+    # Priority 4: If all PostgreSQL connections fail, use forced proxy connection as last resort
+    # before falling back to SQLite
+    logger.warning("All connectivity checks failed, using proxy connection as last attempt")
+    return proxy_conn_string
 
 # Get the appropriate database URL
 SQLALCHEMY_DATABASE_URL = get_database_url()
@@ -88,6 +101,7 @@ def create_db_engine():
     """Create database engine with appropriate retry logic and configuration."""
     if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
         # SQLite-specific configuration
+        logger.warning("⚠️ Using SQLite as fallback - THIS SHOULD NOT HAPPEN IN PRODUCTION")
         return create_engine(
             SQLALCHEMY_DATABASE_URL, 
             connect_args={"check_same_thread": False},
@@ -99,6 +113,8 @@ def create_db_engine():
         
         for attempt in range(max_attempts):
             try:
+                logger.info(f"Attempting to connect to database (attempt {attempt+1}/{max_attempts})...")
+                
                 engine = create_engine(
                     SQLALCHEMY_DATABASE_URL,
                     pool_size=5,
@@ -107,8 +123,8 @@ def create_db_engine():
                     pool_recycle=1800,
                     echo=False,
                     connect_args={
-                        "connect_timeout": 10,  # Timeout for connection establishment
-                        "application_name": "andikar-backend-api"  # Helps identify connections in pg_stat_activity
+                        "connect_timeout": 15,  # Increased timeout for connection establishment
+                        "application_name": "andikar-backend-api"
                     }
                 )
                 
@@ -116,7 +132,7 @@ def create_db_engine():
                 with engine.connect() as conn:
                     result = conn.execute(text("SELECT 1")).fetchone()
                     if result and result[0] == 1:
-                        logger.info(f"Successfully connected to database (attempt {attempt+1})")
+                        logger.info(f"✅ Successfully connected to database (attempt {attempt+1})")
                         
                         # Print database details for debugging
                         try:
@@ -139,10 +155,20 @@ def create_db_engine():
                     logger.info(f"Retrying in {backoff} seconds...")
                     time.sleep(backoff)
                 else:
-                    logger.error(f"All {max_attempts} database connection attempts failed")
+                    logger.error(f"❌ All {max_attempts} database connection attempts failed")
+                    logger.error(f"Last connection error: {str(e)}")
+                    
+                    # Instead of returning None, create a SQLite fallback as absolute last resort
+                    logger.warning("⚠️ Creating SQLite fallback engine - FOR DEVELOPMENT ONLY")
+                    sqlite_url = "sqlite:///./andikar_fallback.db"
+                    return create_engine(
+                        sqlite_url,
+                        connect_args={"check_same_thread": False},
+                        echo=False
+                    )
         
-        # If we get here, all connection attempts failed
-        logger.error("Could not establish database connection, returning None")
+        # This should never be reached, but just in case
+        logger.error("Could not establish any database connection")
         return None
 
 # Create the engine
@@ -154,7 +180,7 @@ if engine is not None:
     logger.info("Database session maker created successfully")
 else:
     # Dummy SessionLocal that will raise exceptions if used
-    logger.warning("Creating dummy SessionLocal due to database connection failure")
+    logger.error("❌ CRITICAL: Failed to create database engine")
     SessionLocal = None
 
 # Create Base class for models
