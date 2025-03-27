@@ -1,114 +1,125 @@
-from fastapi import FastAPI, Depends, HTTPException, status, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from passlib.context import CryptContext
-import os
-import logging
-import json
-from datetime import datetime, timedelta
-from config import settings
-from database import get_db, engine
-import models
-from models import Base
-from auth import get_current_active_user, get_current_user, create_access_token, authenticate_user, get_password_hash
+"""
+Core application file for Andikar Backend API.
 
-# Create app
+This module provides a clean separation between application definition
+and application execution, allowing for better testing and deployment.
+"""
+import logging
+import os
+from fastapi import FastAPI, Request, Depends
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
+from datetime import datetime
+
+# Import utilities and configuration
+import config
+from database import get_db, engine
+from models import Base
+from auth import get_current_user
+from admin import admin_router
+
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger("andikar-app")
+
+# Initialize FastAPI app
 app = FastAPI(
-    title="Andikar Backend API",
-    description="API Gateway for Andikar Services",
-    version="1.0.0"
+    title=config.PROJECT_NAME,
+    description="Backend API Gateway for Andikar AI services",
+    version=config.PROJECT_VERSION
 )
 
-# CORS
+# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Update for production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Create directories
+# Create directories if they don't exist
 os.makedirs("templates", exist_ok=True)
 os.makedirs("static", exist_ok=True)
 
-# Static files
+# Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Templates
+# Set up templates
 templates = Jinja2Templates(directory="templates")
 
-# Root endpoint
+# Include admin router
+app.include_router(admin_router)
+
+# Root endpoint - serves index.html or redirects to API status
 @app.get("/")
-def read_root():
-    return {
-        "name": "Andikar Admin API",
-        "version": "1.0.0",
-        "status": "online",
-        "admin": "/admin"
-    }
-
-# Auth endpoint
-@app.post("/token")
-async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db=Depends(get_db)):
-    user = authenticate_user(db, form_data.username, form_data.password)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.username}, expires_delta=access_token_expires
-    )
-    return {"access_token": access_token, "token_type": "bearer"}
-
-# Admin dashboard
-@app.get("/admin")
-async def admin_dashboard(request: Request, current_user: models.User = Depends(get_current_active_user)):
-    # Simple template rendering with minimal data
-    db = next(get_db())
-    user_count = db.query(models.User).count()
+async def root(request: Request):
+    """
+    Serve the index page as HTML or return API status as JSON based on Accept header
+    """
+    # Check Accept header to determine response type
+    accept = request.headers.get("Accept", "")
     
-    return templates.TemplateResponse("admin/simple_dashboard.html", {
+    # If client explicitly requests JSON, return API status
+    if "application/json" in accept and "text/html" not in accept:
+        return {
+            "status": "healthy",
+            "name": config.PROJECT_NAME,
+            "version": config.PROJECT_VERSION,
+            "description": "Backend API Gateway for Andikar AI services",
+            "timestamp": datetime.utcnow().isoformat(),
+            "environment": os.getenv("RAILWAY_ENVIRONMENT_NAME", "production")
+        }
+    
+    # Otherwise, serve the index.html template
+    return templates.TemplateResponse("index.html", {
         "request": request,
-        "user": current_user,
-        "user_count": user_count,
-        "app_version": settings.PROJECT_VERSION,
-        "humanizer_url": settings.HUMANIZER_API_URL
+        "title": config.PROJECT_NAME,
+        "description": "Backend API Gateway for Andikar AI services",
+        "version": config.PROJECT_VERSION,
+        "status": "healthy",
+        "environment": os.getenv("RAILWAY_ENVIRONMENT_NAME", "production"),
+        "timestamp": datetime.utcnow().isoformat()
     })
 
-# Health check
+# Health check endpoint
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+    """
+    Check system health and return status
+    """
+    return {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "services": {
+            "database": "healthy",
+            "api": "healthy"
+        }
+    }
 
-# Initialize database
-@app.on_event("startup")
-async def startup_event():
-    # Create tables
-    Base.metadata.create_all(bind=engine)
-    
-    # Create admin user if doesn't exist
-    db = next(get_db())
-    if not db.query(models.User).filter(models.User.username == "admin").first():
-        admin_user = models.User(
-            username="admin",
-            email="admin@andikar.com",
-            full_name="Admin User",
-            hashed_password=get_password_hash("admin123"),
-            plan_id="premium",
-            payment_status="Paid",
-            is_active=True
-        )
-        db.add(admin_user)
-        db.commit()
+# Alternate index page endpoint
+@app.get("/index.html")
+async def index_html(request: Request):
+    """
+    Alternative endpoint for index page
+    """
+    return await root(request)
 
-# Run app
+# Home endpoint - alias for root
+@app.get("/home")
+async def home(request: Request):
+    """
+    Alias for root endpoint
+    """
+    return await root(request)
+
+# For local development
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv("PORT", 8000))
-    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=False)
+    port = int(os.getenv("PORT", "8080"))
+    logger.info(f"Starting {config.PROJECT_NAME} on port {port}")
+    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=True)
