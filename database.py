@@ -32,7 +32,9 @@ def get_database_url():
     db = os.getenv("PGDATABASE", "railway")
     
     if proxy_domain and proxy_port and password:
-        db_url = f"postgresql://{user}:{password}@{proxy_domain}:{proxy_port}/{db}"
+        # Use quote_plus to properly encode the password
+        encoded_password = quote_plus(password)
+        db_url = f"postgresql://{user}:{encoded_password}@{proxy_domain}:{proxy_port}/{db}"
         logger.info(f"Using Railway TCP proxy connection: {proxy_domain}:{proxy_port}")
         return db_url
     
@@ -49,15 +51,28 @@ def create_db_engine(max_attempts=5, retry_interval=2):
         return create_engine("sqlite:///andikar.db")
     
     # Mask password in logs
-    safe_url = database_url.replace(os.getenv("PGPASSWORD", ""), "*****") if os.getenv("PGPASSWORD") else database_url
-    safe_url = safe_url.replace(os.getenv("POSTGRES_PASSWORD", ""), "*****") if os.getenv("POSTGRES_PASSWORD") else safe_url
+    safe_url = database_url
+    if os.getenv("PGPASSWORD"):
+        safe_url = safe_url.replace(os.getenv("PGPASSWORD", ""), "*" * 8)
+    if os.getenv("POSTGRES_PASSWORD"):
+        safe_url = safe_url.replace(os.getenv("POSTGRES_PASSWORD", ""), "*" * 8)
     logger.info(f"Database URL: {safe_url}")
     
     # Try to connect to the database with retries
     for attempt in range(1, max_attempts + 1):
         try:
             logger.info(f"Attempting to connect to database (attempt {attempt}/{max_attempts})...")
-            engine = create_engine(database_url)
+            engine = create_engine(
+                database_url,
+                pool_size=5,
+                max_overflow=10,
+                pool_timeout=30,
+                pool_recycle=1800,
+                connect_args={
+                    "connect_timeout": 10,
+                    "application_name": "andikar_backend_api"
+                }
+            )
             engine.connect().close()  # Test connection
             logger.info("✅ Database connection successful!")
             return engine
