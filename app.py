@@ -19,6 +19,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel
 from sqlalchemy import text, desc, func
+from sqlalchemy.orm import Session  # Added missing Session import
 from typing import List, Optional, Dict, Any, Union
 import time
 from pathlib import Path
