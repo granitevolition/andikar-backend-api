@@ -11,7 +11,7 @@ import sys
 import logging
 import uvicorn
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from datetime import datetime, timedelta
@@ -101,7 +101,8 @@ async def root(request: Request):
         <div class="card">
             <h2>Available Test Pages</h2>
             <p>
-                <a href="/admin-dashboard" class="btn">Admin Dashboard</a>
+                <a href="/admin" class="btn">Admin Dashboard</a>
+                <a href="/admin-dashboard" class="btn">Alternative Admin Dashboard</a>
                 <a href="/admin-users" class="btn">User Management</a>
                 <a href="/admin-transactions" class="btn">Transactions</a>
                 <a href="/admin-logs" class="btn">API Logs</a>
@@ -110,15 +111,21 @@ async def root(request: Request):
         </div>
         
         <div class="card">
-            <h2>Test Data Generation</h2>
+            <h2>Debugging Information</h2>
             <p>
-                <a href="/generate-test-data" class="btn">Generate Test Data</a>
+                <a href="/debug" class="btn">View Debug Info</a>
+                <a href="/templates-check" class="btn">Check Templates</a>
+                <a href="/status" class="btn">Server Status</a>
             </p>
-            <p>This will create sample data for testing the dashboard.</p>
         </div>
     </body>
     </html>
     """)
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_main(request: Request):
+    """Main admin endpoint that redirects to the admin dashboard."""
+    return await admin_dashboard(request)
 
 @app.get("/admin-dashboard", response_class=HTMLResponse)
 async def admin_dashboard(request: Request):
@@ -126,109 +133,121 @@ async def admin_dashboard(request: Request):
     if not templates:
         return HTMLResponse("<h1>Error: Templates not configured</h1>")
     
-    # Create test stats
-    stats = {
-        "users": {
-            "total": 125,
-            "active": 98,
-            "recent": [
-                {
-                    "id": "user1",
-                    "username": "john_doe",
-                    "email": "john@example.com",
-                    "plan_id": "pro",
-                    "payment_status": "Paid",
-                    "joined_date": datetime.utcnow() - timedelta(days=5)
-                },
-                {
-                    "id": "user2",
-                    "username": "jane_smith",
-                    "email": "jane@example.com",
-                    "plan_id": "basic",
-                    "payment_status": "Paid",
-                    "joined_date": datetime.utcnow() - timedelta(days=10)
-                },
-                {
-                    "id": "user3",
-                    "username": "bob_jackson",
-                    "email": "bob@example.com",
-                    "plan_id": "free",
-                    "payment_status": "Pending",
-                    "joined_date": datetime.utcnow() - timedelta(days=2)
-                }
-            ]
-        },
-        "transactions": {
-            "successful": 85,
-            "pending": 12,
-            "total": 97
-        },
-        "api": {
-            "total_requests": 1250,
-            "humanize_requests": 950,
-            "detect_requests": 300
+    try:
+        # Create test stats
+        stats = {
+            "users": {
+                "total": 125,
+                "active": 98,
+                "recent": [
+                    {
+                        "id": "user1",
+                        "username": "john_doe",
+                        "email": "john@example.com",
+                        "plan_id": "pro",
+                        "payment_status": "Paid",
+                        "joined_date": datetime.utcnow() - timedelta(days=5)
+                    },
+                    {
+                        "id": "user2",
+                        "username": "jane_smith",
+                        "email": "jane@example.com",
+                        "plan_id": "basic",
+                        "payment_status": "Paid",
+                        "joined_date": datetime.utcnow() - timedelta(days=10)
+                    },
+                    {
+                        "id": "user3",
+                        "username": "bob_jackson",
+                        "email": "bob@example.com",
+                        "plan_id": "free",
+                        "payment_status": "Pending",
+                        "joined_date": datetime.utcnow() - timedelta(days=2)
+                    }
+                ]
+            },
+            "transactions": {
+                "successful": 85,
+                "pending": 12,
+                "total": 97
+            },
+            "api": {
+                "total_requests": 1250,
+                "humanize_requests": 950,
+                "detect_requests": 300
+            }
         }
-    }
-    
-    # Create test chart data
-    days = 30
-    today = datetime.utcnow().date()
-    start_date = today - timedelta(days=days-1)
-    
-    daily_users = []
-    daily_api_usage = []
-    
-    for i in range(days):
-        current_date = start_date + timedelta(days=i)
-        date_str = current_date.strftime("%Y-%m-%d")
         
-        # Random user count
+        # Create test chart data
+        days = 30
+        today = datetime.utcnow().date()
+        start_date = today - timedelta(days=days-1)
+        
+        daily_users = []
+        daily_api_usage = []
+        
         import random
-        user_count = random.randint(0, 5)
+        for i in range(days):
+            current_date = start_date + timedelta(days=i)
+            date_str = current_date.strftime("%Y-%m-%d")
+            
+            # Random user count
+            user_count = random.randint(0, 5)
+            
+            daily_users.append({
+                "date": date_str,
+                "count": user_count
+            })
+            
+            # Random API usage
+            humanize_count = random.randint(10, 50)
+            detect_count = random.randint(5, 20)
+            
+            daily_api_usage.append({
+                "date": date_str,
+                "humanize": humanize_count,
+                "detect": detect_count
+            })
         
-        daily_users.append({
-            "date": date_str,
-            "count": user_count
-        })
-        
-        # Random API usage
-        humanize_count = random.randint(10, 50)
-        detect_count = random.randint(5, 20)
-        
-        daily_api_usage.append({
-            "date": date_str,
-            "humanize": humanize_count,
-            "detect": detect_count
-        })
-    
-    charts = {
-        "daily_users": json.dumps(daily_users),
-        "daily_api_usage": json.dumps(daily_api_usage)
-    }
-    
-    # System status
-    system = {
-        "database": "healthy",
-        "humanizer": "healthy",
-        "detector": "not_configured",
-        "mpesa": "healthy",
-        "info": {
-            "version": "1.0.2",
-            "python_env": "production",
-            "railway_project": "andikar-backend-api",
-            "railway_service": "backend-api"
+        charts = {
+            "daily_users": json.dumps(daily_users),
+            "daily_api_usage": json.dumps(daily_api_usage)
         }
-    }
-    
-    return templates.TemplateResponse("admin/dashboard.html", {
-        "request": request,
-        "title": "Admin Dashboard",
-        "user": {"username": "admin"},
-        "active_page": "dashboard",
-        "stats": stats,
-        "charts": charts,
-        "system": system
-    })
+        
+        # System status
+        system = {
+            "database": "healthy",
+            "humanizer": "healthy",
+            "detector": "not_configured",
+            "mpesa": "healthy",
+            "info": {
+                "version": "1.0.2",
+                "python_env": "production",
+                "railway_project": "andikar-backend-api",
+                "railway_service": "backend-api"
+            }
+        }
+        
+        logger.info("Rendering admin dashboard template")
+        return templates.TemplateResponse("admin/dashboard.html", {
+            "request": request,
+            "title": "Admin Dashboard",
+            "user": {"username": "admin"},
+            "active_page": "dashboard",
+            "stats": stats,
+            "charts": charts,
+            "system": system
+        })
+    except Exception as e:
+        logger.error(f"Error rendering dashboard template: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return HTMLResponse(f"""
+        <h1>Error rendering admin dashboard template</h1>
+        <pre>{e}</pre>
+        <h2>Traceback</h2>
+        <pre>{traceback.format_exc()}</pre>
+        """)
 
 @app.get("/admin-users", response_class=HTMLResponse)
 async def admin_users(request: Request):
@@ -284,6 +303,80 @@ async def admin_users(request: Request):
         logger.error(traceback.format_exc())
         return HTMLResponse(f"<h1>Error rendering template</h1><pre>{e}</pre>")
 
+@app.get("/templates-check")
+async def check_templates():
+    """Check if templates are available and list their contents."""
+    template_info = {}
+    
+    if os.path.exists("templates"):
+        template_info["templates_dir_exists"] = True
+        template_info["templates_contents"] = os.listdir("templates")
+        
+        if os.path.exists("templates/admin"):
+            template_info["admin_dir_exists"] = True
+            template_info["admin_contents"] = os.listdir("templates/admin")
+            
+            # Check for specific admin templates
+            for template in ["base.html", "dashboard.html", "users.html"]:
+                path = os.path.join("templates/admin", template)
+                template_info[f"{template}_exists"] = os.path.exists(path)
+                if os.path.exists(path):
+                    with open(path, "r") as f:
+                        template_info[f"{template}_size"] = len(f.read())
+        else:
+            template_info["admin_dir_exists"] = False
+    else:
+        template_info["templates_dir_exists"] = False
+    
+    return template_info
+
+@app.get("/debug")
+async def debug():
+    """Provide debugging information about the server."""
+    debug_info = {
+        "python_version": sys.version,
+        "current_directory": os.getcwd(),
+        "directory_contents": os.listdir("."),
+        "templates_configured": templates is not None
+    }
+    
+    # Check template directory
+    if os.path.exists("templates"):
+        debug_info["templates_dir"] = {
+            "exists": True,
+            "contents": os.listdir("templates")
+        }
+        
+        # Check admin templates
+        if os.path.exists("templates/admin"):
+            debug_info["admin_templates_dir"] = {
+                "exists": True,
+                "contents": os.listdir("templates/admin")
+            }
+            
+            # Get sample of template content
+            for template in ["base.html", "dashboard.html"]:
+                path = os.path.join("templates/admin", template)
+                if os.path.exists(path):
+                    with open(path, "r") as f:
+                        content = f.read()
+                        debug_info[f"{template}_sample"] = content[:200] + "..." if len(content) > 200 else content
+        else:
+            debug_info["admin_templates_dir"] = {"exists": False}
+    else:
+        debug_info["templates_dir"] = {"exists": False}
+    
+    # Check static directory
+    if os.path.exists("static"):
+        debug_info["static_dir"] = {
+            "exists": True,
+            "contents": os.listdir("static")
+        }
+    else:
+        debug_info["static_dir"] = {"exists": False}
+    
+    return debug_info
+
 @app.get("/status")
 async def status():
     """Health check endpoint."""
@@ -291,12 +384,13 @@ async def status():
         "status": "healthy",
         "service": "Admin Test Server",
         "templates_configured": templates is not None,
-        "admin_templates_available": os.path.exists("templates/admin")
+        "admin_templates_available": os.path.exists("templates/admin"),
+        "timestamp": datetime.utcnow().isoformat()
     }
 
 if __name__ == "__main__":
     # Get port from environment or use default
-    port = int(os.environ.get("PORT", 8000))
+    port = int(os.environ.get("PORT", 8080))
     logger.info(f"Starting server on port {port}")
     
     # Run the app
