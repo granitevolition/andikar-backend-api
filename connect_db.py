@@ -18,17 +18,18 @@ DB_HOST = os.getenv("PGHOST", "postgres.railway.internal")
 DB_PROXY_HOST = os.getenv("RAILWAY_TCP_PROXY_DOMAIN", "ballast.proxy.rlwy.net")
 DB_PROXY_PORT = os.getenv("RAILWAY_TCP_PROXY_PORT", "11148")
 
-# Connection strings
-DIRECT_CONN_STRING = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+# Connection strings - prioritize proxy connection
 PROXY_CONN_STRING = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_PROXY_HOST}:{DB_PROXY_PORT}/{DB_NAME}"
+DIRECT_CONN_STRING = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
 def try_connect(connection_string, name="Database", print_details=True):
     """Try to connect to PostgreSQL using the given connection string."""
+    masked_conn_string = connection_string.replace(DB_PASSWORD, "****")
     try:
-        print(f"Attempting to connect to {name} with: {connection_string.split('@')[0]}@...")
+        print(f"Attempting to connect to {name} with: {masked_conn_string}")
         
         # Create connection
-        conn = psycopg2.connect(connection_string, connect_timeout=10)
+        conn = psycopg2.connect(connection_string, connect_timeout=15)
         conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
         
         # Test connection
@@ -114,6 +115,15 @@ def create_tables(conn):
         )
         """,
         """
+        CREATE TABLE IF NOT EXISTS rate_limits (
+            id VARCHAR(255) PRIMARY KEY,
+            user_id VARCHAR(255) REFERENCES users(id) ON DELETE CASCADE,
+            key VARCHAR(255) UNIQUE,
+            requests JSONB DEFAULT '[]',
+            last_updated FLOAT DEFAULT extract(epoch from now())
+        )
+        """,
+        """
         CREATE TABLE IF NOT EXISTS pricing_plans (
             id VARCHAR(255) PRIMARY KEY,
             name VARCHAR(255) NOT NULL,
@@ -128,13 +138,41 @@ def create_tables(conn):
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS webhooks (
+            id VARCHAR(255) PRIMARY KEY,
+            user_id VARCHAR(255) REFERENCES users(id) ON DELETE CASCADE,
+            url VARCHAR(255),
+            events JSONB DEFAULT '[]',
+            secret VARCHAR(255),
+            is_active BOOLEAN DEFAULT TRUE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_triggered JSONB
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS usage_stats (
+            id VARCHAR(255) PRIMARY KEY,
+            user_id VARCHAR(255) REFERENCES users(id) ON DELETE CASCADE,
+            year INTEGER,
+            month INTEGER,
+            day INTEGER,
+            humanize_requests INTEGER DEFAULT 0,
+            detect_requests INTEGER DEFAULT 0,
+            words_processed INTEGER DEFAULT 0,
+            total_processing_time FLOAT DEFAULT 0,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
         """
     ]
     
     try:
         with conn.cursor() as cursor:
             for table_def in table_definitions:
-                print(f"Creating table: {table_def.split('CREATE TABLE IF NOT EXISTS')[1].split('(')[0].strip()}")
+                table_name = table_def.split('CREATE TABLE IF NOT EXISTS')[1].split('(')[0].strip()
+                print(f"Creating table: {table_name}")
                 cursor.execute(table_def)
             print("✅ All tables created successfully")
         return True
@@ -227,13 +265,16 @@ def main():
     print()
     
     # Try different connection methods in order of preference
+    # Try proxy connection first (most reliable in Railway environment)
     connections_to_try = [
-        (DIRECT_CONN_STRING, "Direct connection"),
-        (PROXY_CONN_STRING, "Proxy connection")
+        (PROXY_CONN_STRING, "Railway Proxy connection"),
+        (DIRECT_CONN_STRING, "Direct internal connection"),
+        (os.getenv("DATABASE_URL", PROXY_CONN_STRING), "DATABASE_URL"),
     ]
     
     connection = None
     for conn_string, name in connections_to_try:
+        print(f"\nAttempting connection method: {name}")
         connection = try_connect(conn_string, name)
         if connection:
             break
@@ -243,6 +284,8 @@ def main():
     if not connection:
         print("❌ All connection attempts failed")
         print("Please check your database configuration and network connectivity")
+        print("Ensure the correct credentials are in the .env file")
+        print("Double-check that the Railway TCP proxy is properly configured")
         sys.exit(1)
     
     # Create tables
