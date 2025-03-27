@@ -5,7 +5,7 @@
     "buildCommand": "chmod +x *.py"
   },
   "deploy": {
-    "startCommand": "python app.py",
+    "startCommand": "python railway_start.py",
     "healthcheckPath": "/status",
     "healthcheckTimeout": 60,
     "healthcheckInterval": 15,
