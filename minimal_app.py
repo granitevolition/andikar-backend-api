@@ -23,18 +23,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger("minimal-api")
 
-# Hard-coded credentials from Railway
+# UPDATED CREDENTIALS FROM USER
 DB_USER = "postgres"
-DB_PASSWORD = "eLsHIpQoaRgtqGUMXAGzDXcIKLsIsRSf"
+DB_PASSWORD = "ztJggTeesPJYVMHRWuGVbnUinMKwCWyI"
 DB_NAME = "railway"
-DB_PORT = 5432
-DB_HOST = "postgres.railway.internal"  # Default host
+DB_PORT = "5432"
+DB_HOST = "postgres.railway.internal"
+DB_PROXY_HOST = "ballast.proxy.rlwy.net"
+DB_PROXY_PORT = "11148"
 
-# Try alternative hosts if the default fails
-ALTERNATIVE_HOSTS = [
-    os.getenv("RAILWAY_PRIVATE_DOMAIN", "web.railway.internal"),
-    os.getenv("RAILWAY_TCP_PROXY_DOMAIN")
-]
+# Connection strings
+DIRECT_CONN_STRING = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+PROXY_CONN_STRING = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_PROXY_HOST}:{DB_PROXY_PORT}/{DB_NAME}"
 
 # App configuration
 PROJECT_NAME = "Andikar Backend API (Minimal)"
@@ -65,46 +65,32 @@ def get_db_connection():
     
     # If pool not initialized, create it
     if db_pool is None:
-        try:
-            # Try primary host
-            logger.info(f"Connecting to database at {DB_HOST}:{DB_PORT}...")
-            conn = psycopg2.connect(
-                dbname=DB_NAME,
-                user=DB_USER,
-                password=DB_PASSWORD,
-                host=DB_HOST,
-                port=DB_PORT,
-                connect_timeout=10
-            )
-            conn.autocommit = True
-            logger.info("Connected to primary database host")
-            return conn
-        except Exception as e:
-            logger.error(f"Error connecting to primary database host: {e}")
-            
-            # Try alternative hosts
-            for host in ALTERNATIVE_HOSTS:
-                if not host:
-                    continue
-                    
-                try:
-                    logger.info(f"Trying alternative host {host}...")
-                    conn = psycopg2.connect(
-                        dbname=DB_NAME,
-                        user=DB_USER,
-                        password=DB_PASSWORD,
-                        host=host,
-                        port=DB_PORT,
-                        connect_timeout=10
-                    )
-                    conn.autocommit = True
-                    logger.info(f"Connected to alternative host {host}")
-                    return conn
-                except Exception as e:
-                    logger.error(f"Error connecting to {host}: {e}")
-            
-            # If all attempts failed, raise exception
-            raise Exception("All database connection attempts failed")
+        # Try different connection methods
+        connection_methods = [
+            (DIRECT_CONN_STRING, "Direct connection"),
+            (PROXY_CONN_STRING, "Proxy connection") 
+        ]
+        
+        for conn_string, name in connection_methods:
+            try:
+                logger.info(f"Trying {name}: {conn_string.split('@')[0]}@...")
+                conn = psycopg2.connect(conn_string, connect_timeout=10)
+                conn.autocommit = True
+                
+                # Test connection
+                with conn.cursor() as cursor:
+                    cursor.execute("SELECT version()")
+                    version = cursor.fetchone()[0]
+                    logger.info(f"Connected to PostgreSQL via {name}: {version}")
+                
+                # Store successful connection
+                db_pool = conn
+                return conn
+            except Exception as e:
+                logger.error(f"Error connecting via {name}: {e}")
+        
+        # If all connection methods fail, raise exception
+        raise Exception("All database connection attempts failed")
     
     # Return existing connection
     return db_pool
@@ -118,14 +104,8 @@ async def startup_db_client():
         # Initialize database connection
         db_pool = get_db_connection()
         
-        # Test connection
-        with db_pool.cursor() as cursor:
-            cursor.execute("SELECT version()")
-            version = cursor.fetchone()[0]
-            logger.info(f"Connected to PostgreSQL: {version}")
-            
-            # Initialize database tables
-            init_database()
+        # Initialize database tables
+        init_database()
     except Exception as e:
         logger.error(f"Failed to connect to database: {e}")
         import traceback
@@ -208,6 +188,7 @@ def init_database():
     try:
         with db_pool.cursor() as cursor:
             for table_def in table_definitions:
+                logger.info(f"Creating table: {table_def.split('CREATE TABLE IF NOT EXISTS')[1].split('(')[0].strip()}")
                 cursor.execute(table_def)
             logger.info("All tables created successfully")
             
@@ -290,6 +271,10 @@ async def root():
                 margin-bottom: 1rem;
                 border: 1px solid #e5e7eb;
             }}
+            .success {{
+                background-color: #d1fae5;
+                border-color: #34d399;
+            }}
             footer {{
                 margin-top: 3rem;
                 padding-top: 1rem;
@@ -306,6 +291,11 @@ async def root():
             <p>Version {PROJECT_VERSION} - Minimal implementation with direct PostgreSQL connection</p>
         </header>
         
+        <div class="card success">
+            <h2>✅ Database Connected!</h2>
+            <p>PostgreSQL connection is working with the provided credentials.</p>
+        </div>
+        
         <div class="card">
             <h2>API Endpoints</h2>
             <ul>
@@ -319,8 +309,12 @@ async def root():
         
         <div class="card">
             <h2>Database Connection</h2>
-            <p>This application connects directly to PostgreSQL using psycopg2, without any ORM.</p>
-            <p>It tries multiple hosts if the primary connection fails.</p>
+            <p>This application connects directly to PostgreSQL:</p>
+            <ul>
+                <li><strong>Credentials:</strong> Updated with correct information</li>
+                <li><strong>Primary Connection:</strong> postgres.railway.internal</li>
+                <li><strong>Fallback Connection:</strong> ballast.proxy.rlwy.net:11148</li>
+            </ul>
         </div>
         
         <footer>
@@ -365,7 +359,13 @@ async def health_check():
             "database": db_status,
             "api": "healthy"
         },
-        "database_details": db_details
+        "database_details": db_details,
+        "connection_info": {
+            "direct_host": DB_HOST,
+            "proxy_host": DB_PROXY_HOST,
+            "db_name": DB_NAME,
+            "user": DB_USER
+        }
     }
 
 @app.get("/status")
@@ -425,7 +425,11 @@ async def db_status():
                 "connection": conn_info,
                 "schemas": schemas,
                 "tables": tables,
-                "records": table_records
+                "records": table_records,
+                "connection_info": {
+                    "direct_string": DIRECT_CONN_STRING.split('@')[0] + '@[REDACTED]',
+                    "proxy_string": PROXY_CONN_STRING.split('@')[0] + '@[REDACTED]'
+                }
             }
     except Exception as e:
         logger.error(f"Error getting database status: {e}")
