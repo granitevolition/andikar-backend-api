@@ -7,38 +7,20 @@
 set -e
 
 echo "========== ANDIKAR BACKEND API STARTUP =========="
-echo "Environment variables:"
+echo "Environment variables (excluding sensitive data):"
 printenv | grep -v PASSWORD | grep -v SECRET | grep -v KEY | sort
 
-# Run database diagnostic tool
-echo "Running database diagnostic tool..."
-python db_diagnostic.py
+# Set up DATABASE_URL explicitly
+echo "Setting up database connection..."
+PGUSER=${PGUSER:-postgres}
+PGDATABASE=${PGDATABASE:-railway}
+POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-ztJggTeesPJYVMHRWuGVbnUinMKwCWyI}
+RAILWAY_TCP_PROXY_DOMAIN=${RAILWAY_TCP_PROXY_DOMAIN:-ballast.proxy.rlwy.net}
+RAILWAY_TCP_PROXY_PORT=${RAILWAY_TCP_PROXY_PORT:-11148}
 
-# Wait for database to be ready
-echo "Waiting for database to be ready..."
-
-# Use exact DATABASE_URL if available
-if [ -n "$DATABASE_URL" ]; then
-    echo "Using exact DATABASE_URL for database connection"
-    SQLALCHEMY_DB_URL="$DATABASE_URL"
-    # Ensure it uses postgresql:// protocol
-    SQLALCHEMY_DB_URL="${SQLALCHEMY_DB_URL/postgres:/postgresql:}"
-    export SQLALCHEMY_DATABASE_URL="$SQLALCHEMY_DB_URL"
-    
-    # Mask password for logging
-    MASKED_URL=$(echo "$SQLALCHEMY_DB_URL" | sed -E 's/(:\/\/[^:]+:)[^@]+(@)/\1****\2/')
-    echo "Connection URL set to: $MASKED_URL"
-    
-# Otherwise try to construct connection URLs
-elif [ -n "$RAILWAY_TCP_PROXY_DOMAIN" ] && [ -n "$RAILWAY_TCP_PROXY_PORT" ]; then
-    echo "Using Railway TCP proxy for database connection"
-    export SQLALCHEMY_DATABASE_URL="postgresql://${PGUSER}:${POSTGRES_PASSWORD}@${RAILWAY_TCP_PROXY_DOMAIN}:${RAILWAY_TCP_PROXY_PORT}/${PGDATABASE}"
-    echo "Connection URL set to: postgresql://${PGUSER}:****@${RAILWAY_TCP_PROXY_DOMAIN}:${RAILWAY_TCP_PROXY_PORT}/${PGDATABASE}"
-else
-    echo "Using direct internal connection"
-    export SQLALCHEMY_DATABASE_URL="postgresql://${PGUSER}:${POSTGRES_PASSWORD}@${PGHOST}:${PGPORT}/${PGDATABASE}"
-    echo "Connection URL set to: postgresql://${PGUSER}:****@${PGHOST}:${PGPORT}/${PGDATABASE}"
-fi
+# Always use the TCP proxy connection 
+export DATABASE_URL="postgresql://$PGUSER:$POSTGRES_PASSWORD@$RAILWAY_TCP_PROXY_DOMAIN:$RAILWAY_TCP_PROXY_PORT/$PGDATABASE"
+echo "Database URL set to: postgresql://$PGUSER:****@$RAILWAY_TCP_PROXY_DOMAIN:$RAILWAY_TCP_PROXY_PORT/$PGDATABASE"
 
 # Initialize the database - retry if it fails
 max_attempts=5
