@@ -3,6 +3,7 @@ import logging
 import psycopg2
 from psycopg2.extras import DictCursor
 from contextlib import contextmanager
+from urllib.parse import quote_plus
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -13,6 +14,9 @@ def get_connection_params():
     # Priority 1: Use direct DATABASE_URL
     db_url = os.getenv("DATABASE_URL")
     if db_url:
+        # Convert postgres:// to postgresql:// if needed
+        if db_url.startswith("postgres://"):
+            db_url = db_url.replace("postgres://", "postgresql://", 1)
         logger.info("Using DATABASE_URL environment variable")
         return db_url
     
@@ -24,7 +28,9 @@ def get_connection_params():
     db = os.getenv("PGDATABASE", "railway")
     
     if proxy_domain and proxy_port and password:
-        db_url = f"postgresql://{user}:{password}@{proxy_domain}:{proxy_port}/{db}"
+        # Use quote_plus to properly encode the password
+        encoded_password = quote_plus(password)
+        db_url = f"postgresql://{user}:{encoded_password}@{proxy_domain}:{proxy_port}/{db}"
         logger.info(f"Using Railway TCP proxy connection")
         return db_url
     
@@ -34,7 +40,9 @@ def get_connection_params():
         "port": os.getenv("PGPORT", 5432),
         "user": user,
         "password": password,
-        "database": db
+        "database": db,
+        "connect_timeout": 10,
+        "application_name": "andikar_backend_api"
     }
 
 @contextmanager
