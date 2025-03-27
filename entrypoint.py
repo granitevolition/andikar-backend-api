@@ -18,7 +18,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
+try:
+    from fastapi.templating import Jinja2Templates
+    TEMPLATES_AVAILABLE = True
+except (ImportError, AssertionError):
+    TEMPLATES_AVAILABLE = False
 from fastapi.staticfiles import StaticFiles
 
 # Set up logging
@@ -45,14 +49,15 @@ startup_app = FastAPI(
     version="1.0.0"
 )
 
-# Set up templates
-templates = Jinja2Templates(directory="templates")
+# Set up templates if available
+if TEMPLATES_AVAILABLE:
+    templates = Jinja2Templates(directory="templates")
 
-# Create status page HTML template if it doesn't exist
-status_template_path = os.path.join("templates", "status.html")
-if not os.path.exists(status_template_path):
-    with open(status_template_path, "w") as f:
-        f.write("""<!DOCTYPE html>
+    # Create status page HTML template if it doesn't exist
+    status_template_path = os.path.join("templates", "status.html")
+    if not os.path.exists(status_template_path):
+        with open(status_template_path, "w") as f:
+            f.write("""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -137,17 +142,39 @@ if not os.path.exists(status_template_path):
 </html>""")
 
 # Mount static files
-startup_app.mount("/static", StaticFiles(directory="static"), name="static")
+try:
+    startup_app.mount("/static", StaticFiles(directory="static"), name="static")
+except Exception as e:
+    logger.warning(f"Could not mount static files: {str(e)}")
 
 # Status page route
 @startup_app.get("/", response_class=HTMLResponse)
 async def status_page(request: Request):
-    return templates.TemplateResponse("status.html", {
-        "request": request,
-        "progress": startup_progress,
-        "status": startup_status,
-        "message": startup_message
-    })
+    if TEMPLATES_AVAILABLE:
+        return templates.TemplateResponse("status.html", {
+            "request": request,
+            "progress": startup_progress,
+            "status": startup_status,
+            "message": startup_message
+        })
+    else:
+        # Fallback HTML if templates not available
+        html_content = f"""
+        <html>
+            <head>
+                <title>Andikar Backend API - Starting Up</title>
+                <meta http-equiv="refresh" content="5">
+            </head>
+            <body>
+                <h1>Andikar Backend API</h1>
+                <p>Status: {startup_status}</p>
+                <p>Progress: {startup_progress}%</p>
+                <p>{startup_message}</p>
+                <p>This page will automatically refresh every 5 seconds</p>
+            </body>
+        </html>
+        """
+        return HTMLResponse(content=html_content)
 
 # Status API route
 @startup_app.get("/status")
@@ -195,17 +222,21 @@ def run_main_app():
         update_startup_progress("finishing", "Finishing startup process...", 90)
         time.sleep(1)  # Simulate final startup tasks
         
-        # Import main app here to avoid circular imports
-        from app import app as main_app
-        
-        # Mark startup as complete
-        update_startup_progress("complete", "Startup complete! Redirecting to main application...", 100)
-        startup_complete = True
-        
-        # Run the main app using Uvicorn
-        import uvicorn
-        port = int(os.getenv("PORT", "8080"))
-        uvicorn.run(main_app, host="0.0.0.0", port=port)
+        try:
+            # Import main app here to avoid circular imports
+            from main import app as main_app
+            
+            # Mark startup as complete
+            update_startup_progress("complete", "Startup complete! Redirecting to main application...", 100)
+            startup_complete = True
+            
+            # Run the main app using Uvicorn
+            import uvicorn
+            port = int(os.getenv("PORT", "8080"))
+            uvicorn.run(main_app, host="0.0.0.0", port=port)
+        except ImportError:
+            logger.error("Could not import main app, falling back to simple app")
+            raise
         
     except Exception as e:
         # Log the error
@@ -216,10 +247,91 @@ def run_main_app():
         # Update status to error
         update_startup_progress("error", f"Error starting application: {str(e)}", 0)
         
-        # Keep the startup app running
+        # Create basic index.html if it doesn't exist
+        if not os.path.exists("templates/index.html"):
+            os.makedirs("templates", exist_ok=True)
+            with open("templates/index.html", "w") as f:
+                f.write("""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Andikar Backend API</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { padding: 2rem; font-family: system-ui, sans-serif; }
+        .container { max-width: 800px; margin: 0 auto; }
+        h1 { margin-bottom: 1rem; }
+        .card { margin-bottom: 1rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Andikar Backend API</h1>
+        <div class="alert alert-warning">
+            The application is experiencing difficulties starting up. Basic navigation is available below.
+        </div>
+        
+        <div class="card">
+            <div class="card-header">Navigation</div>
+            <div class="card-body">
+                <ul>
+                    <li><a href="/docs">API Documentation</a></li>
+                    <li><a href="/redoc">ReDoc Documentation</a></li>
+                    <li><a href="/health">Health Check</a></li>
+                </ul>
+            </div>
+        </div>
+        
+        <div class="card">
+            <div class="card-header">Status</div>
+            <div class="card-body">
+                <p>Status: Error</p>
+                <p>Message: The application encountered an error during startup.</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>""")
+        
+        # Create a simple FastAPI app as fallback
+        fallback_app = FastAPI(
+            title="Andikar API (Limited Mode)",
+            description="Running in limited mode due to startup error",
+            version="1.0.0"
+        )
+        
+        if TEMPLATES_AVAILABLE:
+            fallback_templates = Jinja2Templates(directory="templates")
+            
+            @fallback_app.get("/", response_class=HTMLResponse)
+            async def fallback_root(request: Request):
+                return fallback_templates.TemplateResponse("index.html", {"request": request})
+        else:
+            @fallback_app.get("/")
+            async def fallback_root():
+                return {"status": "error", "message": "The application encountered an error during startup"}
+        
+        @fallback_app.get("/health")
+        async def fallback_health():
+            return {
+                "status": "unhealthy",
+                "error": str(e),
+                "timestamp": time.time()
+            }
+        
+        @fallback_app.get("/status")
+        async def fallback_status():
+            return {
+                "status": "error",
+                "message": str(e),
+                "timestamp": time.time()
+            }
+        
+        # Run the fallback app
         import uvicorn
         port = int(os.getenv("PORT", "8080"))
-        uvicorn.run(startup_app, host="0.0.0.0", port=port)
+        uvicorn.run(fallback_app, host="0.0.0.0", port=port)
 
 # Main entry point
 if __name__ == "__main__":
@@ -230,4 +342,9 @@ if __name__ == "__main__":
     # Run the startup app while waiting for the main app to start
     import uvicorn
     port = int(os.getenv("PORT", "8080"))
-    uvicorn.run(startup_app, host="0.0.0.0", port=port)
+    try:
+        uvicorn.run(startup_app, host="0.0.0.0", port=port)
+    except Exception as e:
+        # If startup app fails, log the error and exit
+        logger.error(f"Error running startup app: {str(e)}")
+        sys.exit(1)
