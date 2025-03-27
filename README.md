@@ -1,6 +1,6 @@
 # Andikar Backend API
 
-A robust backend API gateway for the Andikar AI ecosystem with PostgreSQL database integration.
+A robust backend API gateway for the Andikar AI ecosystem with PostgreSQL database integration on Railway.
 
 ## Features
 
@@ -15,24 +15,46 @@ A robust backend API gateway for the Andikar AI ecosystem with PostgreSQL databa
 This application is configured to automatically connect to a PostgreSQL database on Railway. It follows a robust connection strategy:
 
 1. First tries `postgres.railway.internal` private network connection
-2. If that fails, uses the `DATABASE_PUBLIC_URL` environment variable
-3. If that's not set, constructs a connection URL from environment variables
-4. As a last resort, falls back to SQLite for development/testing
+2. If that fails, uses the public TCP proxy connection via `RAILWAY_TCP_PROXY_DOMAIN`
+3. As a last resort, falls back to SQLite for development/testing
 
 ### Environment Variables for Database Connection
 
 The following environment variables are used for database connection:
 
 - `DATABASE_URL` - Full PostgreSQL connection string (preferred)
-- `DATABASE_PUBLIC_URL` - External PostgreSQL connection string
 - `PGUSER` - PostgreSQL username
 - `POSTGRES_PASSWORD` - PostgreSQL password
 - `PGDATABASE` - PostgreSQL database name
-- `RAILWAY_PRIVATE_DOMAIN` - Internal Railway network domain
+- `PGHOST` - PostgreSQL host (typically postgres.railway.internal)
+- `PGPORT` - PostgreSQL port (typically 5432)
 - `RAILWAY_TCP_PROXY_DOMAIN` - External Railway proxy domain
 - `RAILWAY_TCP_PROXY_PORT` - External Railway proxy port
 
-If using Railway's PostgreSQL service, these are automatically set and the connection should work without additional configuration.
+All of these environment variables are automatically set by Railway when you add a PostgreSQL service to your project.
+
+### Testing Database Connection
+
+To test the database connection, you can run:
+
+```bash
+python test_db_connection.py
+```
+
+This script will attempt to connect to the database using both direct and proxy methods, and will display information about the database if successful.
+
+### Initializing the Database
+
+To initialize the database with tables and seed data, run:
+
+```bash
+python initialize_database.py
+```
+
+This script will:
+1. Connect to the database using the configured connection details
+2. Create all necessary tables if they don't exist
+3. Seed initial data like pricing plans and admin user
 
 ## Database Models
 
@@ -96,8 +118,10 @@ If you're experiencing database connection issues:
 
 1. **Check logs:** Look for connection errors in the application logs
 2. **Verify environment variables:** Make sure all required variables are set
-3. **Test network connectivity:** Ensure the application can reach the database
-4. **Check database status:** Verify the PostgreSQL service is running
-5. **Database reset:** Use `/admin/database/reset?confirm=yes` (admin only)
+3. **Run test script:** Use `python test_db_connection.py` to diagnose connection issues
+4. **Initialize database:** Use `python initialize_database.py` to set up tables
+5. **Check network connectivity:** Ensure the application can reach the database
+6. **Check database status:** Verify the PostgreSQL service is running
+7. **Database reset:** Use `/admin/database/reset?confirm=yes` (admin only)
 
-For manual database initialization, use the `/admin/database/seed` endpoint.
+For manual database initialization, you can also use the `/admin/database/seed` endpoint.
