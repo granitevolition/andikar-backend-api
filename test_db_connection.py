@@ -1,106 +1,204 @@
+#!/usr/bin/env python3
 """
-Test database connection script for Andikar Backend API.
-Run this script to verify the PostgreSQL connection and check existing tables.
-"""
-import os
-import logging
-import sys
-import psycopg2
-from dotenv import load_dotenv
-import time
+Database Connection Test Script
 
-# Load environment variables from .env file
-load_dotenv()
+This script tests the connection to the PostgreSQL database using direct connection,
+SQLAlchemy, and psycopg2. It helps identify connection issues and verify credentials.
+"""
+
+import os
+import sys
+import time
+import logging
+import urllib.parse
+from urllib.parse import urlparse
 
 # Set up logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("db-test")
 
-def test_connection(connection_string, name="Database"):
-    """Test a PostgreSQL connection string."""
-    masked_conn_string = connection_string
-    if '@' in masked_conn_string:
-        parts = masked_conn_string.split('@')
-        auth_part = parts[0].split('://')
-        masked_conn_string = f"{auth_part[0]}://*****@{parts[1]}"
+try:
+    import psycopg2
+    from sqlalchemy import create_engine, text
+except ImportError:
+    logger.error("Please install required packages: pip install psycopg2-binary sqlalchemy")
+    sys.exit(1)
+
+def mask_password(url):
+    """Mask the password in a URL for safe logging."""
+    if not url:
+        return "Not set"
+    try:
+        parsed = urlparse(url)
+        if parsed.password:
+            masked = parsed._replace(netloc=parsed.netloc.replace(
+                parsed.password, "****"))
+            return masked.geturl()
+        return url
+    except Exception:
+        return url
+
+def get_database_url():
+    """Get the database URL from environment variables."""
+    # Check for DATABASE_URL
+    db_url = os.getenv("DATABASE_URL")
+    if db_url:
+        # Convert postgres:// to postgresql:// if needed
+        if db_url.startswith("postgres://"):
+            db_url = db_url.replace("postgres://", "postgresql://", 1)
+        logger.info(f"Using DATABASE_URL: {mask_password(db_url)}")
+        return db_url
     
-    logger.info(f"Testing connection to {name}: {masked_conn_string}")
+    # Construct from individual components
+    pguser = os.getenv("PGUSER", "postgres")
+    pgpassword = os.getenv("PGPASSWORD") or os.getenv("POSTGRES_PASSWORD")
+    pgdatabase = os.getenv("PGDATABASE", "railway")
+    
+    # Try proxy connection
+    proxy_domain = os.getenv("RAILWAY_TCP_PROXY_DOMAIN")
+    proxy_port = os.getenv("RAILWAY_TCP_PROXY_PORT")
+    
+    if proxy_domain and proxy_port and pgpassword:
+        # URL encode the password
+        encoded_password = urllib.parse.quote_plus(pgpassword)
+        db_url = f"postgresql://{pguser}:{encoded_password}@{proxy_domain}:{proxy_port}/{pgdatabase}"
+        logger.info(f"Using proxy connection: {mask_password(db_url)}")
+        return db_url
+    
+    # Try direct connection
+    pghost = os.getenv("PGHOST", "localhost")
+    pgport = os.getenv("PGPORT", "5432")
+    
+    if pghost and pgport and pgpassword:
+        # URL encode the password
+        encoded_password = urllib.parse.quote_plus(pgpassword)
+        db_url = f"postgresql://{pguser}:{encoded_password}@{pghost}:{pgport}/{pgdatabase}"
+        logger.info(f"Using direct connection: {mask_password(db_url)}")
+        return db_url
+    
+    logger.error("No database connection information available")
+    return None
+
+def test_sqlalchemy_connection():
+    """Test database connection using SQLAlchemy."""
+    logger.info("Testing SQLAlchemy connection...")
+    
+    db_url = get_database_url()
+    if not db_url:
+        logger.error("Cannot test SQLAlchemy connection: No database URL available")
+        return False
     
     try:
-        # Create connection
-        conn = psycopg2.connect(connection_string, connect_timeout=10)
+        engine = create_engine(
+            db_url,
+            pool_size=1,
+            max_overflow=0,
+            connect_args={
+                "connect_timeout": 10,
+                "application_name": "andikar_connection_test"
+            }
+        )
         
         # Test connection
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT version();")
-            version = cursor.fetchone()[0]
-            logger.info(f"✅ Connected to PostgreSQL: {version}")
+        with engine.connect() as conn:
+            result = conn.execute(text("SELECT 1 as test"))
+            test_value = result.fetchone()[0]
+            logger.info(f"SQLAlchemy connection successful (test value: {test_value})")
             
-            # Get database details
-            cursor.execute("SELECT current_database(), current_user;")
-            details = cursor.fetchone()
-            logger.info(f"Database: {details[0]}")
-            logger.info(f"User: {details[1]}")
+            # Get database version
+            try:
+                result = conn.execute(text("SELECT version()"))
+                version = result.fetchone()[0]
+                logger.info(f"Database version: {version}")
+            except Exception as e:
+                logger.warning(f"Could not get database version: {e}")
             
-            # Get list of schemas
-            cursor.execute("SELECT schema_name FROM information_schema.schemata;")
-            schemas = cursor.fetchall()
-            logger.info(f"Available schemas: {', '.join([s[0] for s in schemas])}")
+            # Get current database and user
+            try:
+                result = conn.execute(text("SELECT current_database(), current_user"))
+                db, user = result.fetchone()
+                logger.info(f"Connected to database: {db} as user: {user}")
+            except Exception as e:
+                logger.warning(f"Could not get database/user info: {e}")
+        
+        return True
+    except Exception as e:
+        logger.error(f"SQLAlchemy connection failed: {e}")
+        return False
+
+def test_psycopg2_connection():
+    """Test database connection using psycopg2 directly."""
+    logger.info("Testing psycopg2 connection...")
+    
+    db_url = get_database_url()
+    if not db_url:
+        logger.error("Cannot test psycopg2 connection: No database URL available")
+        return False
+    
+    try:
+        conn = psycopg2.connect(
+            db_url,
+            connect_timeout=10,
+            application_name="andikar_connection_test"
+        )
+        
+        # Test connection
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 as test")
+            test_value = cur.fetchone()[0]
+            logger.info(f"psycopg2 connection successful (test value: {test_value})")
             
-            # Get list of tables in public schema
-            cursor.execute("""
-                SELECT table_name 
-                FROM information_schema.tables 
-                WHERE table_schema = 'public';
-            """)
-            tables = cursor.fetchall()
-            if tables:
-                logger.info(f"Existing tables: {', '.join([t[0] for t in tables])}")
-                
-                # Show row counts for important tables
-                for table in tables:
-                    cursor.execute(f"SELECT COUNT(*) FROM {table[0]};")
-                    count = cursor.fetchone()[0]
-                    logger.info(f"  - {table[0]}: {count} rows")
-            else:
-                logger.info("No tables found in public schema")
+            # Get database version
+            try:
+                cur.execute("SELECT version()")
+                version = cur.fetchone()[0]
+                logger.info(f"Database version: {version}")
+            except Exception as e:
+                logger.warning(f"Could not get database version: {e}")
         
         conn.close()
         return True
-        
     except Exception as e:
-        logger.error(f"❌ Connection failed: {str(e)}")
+        logger.error(f"psycopg2 connection failed: {e}")
         return False
 
-if __name__ == "__main__":
-    logger.info("Starting database connection tests...")
+def main():
+    """Run database connection tests."""
+    print("\n====== DATABASE CONNECTION TEST ======\n")
     
-    # Gather connection details
-    pg_user = os.getenv("PGUSER", "postgres")
-    pg_password = os.getenv("POSTGRES_PASSWORD", "ztJggTeesPJYVMHRWuGVbnUinMKwCWyI")
-    pg_db = os.getenv("PGDATABASE", "railway")
-    pg_port = os.getenv("PGPORT", "5432")
-    pg_host = os.getenv("PGHOST", "postgres.railway.internal")
-    proxy_domain = os.getenv("RAILWAY_TCP_PROXY_DOMAIN", "ballast.proxy.rlwy.net")
-    proxy_port = os.getenv("RAILWAY_TCP_PROXY_PORT", "11148")
+    # Check environment variables
+    print("Environment variables:")
+    print(f"DATABASE_URL: {mask_password(os.getenv('DATABASE_URL', 'Not set'))}")
+    print(f"PGUSER: {os.getenv('PGUSER', 'Not set')}")
+    print(f"PGPASSWORD: {'****' if os.getenv('PGPASSWORD') else 'Not set'}")
+    print(f"POSTGRES_PASSWORD: {'****' if os.getenv('POSTGRES_PASSWORD') else 'Not set'}")
+    print(f"PGDATABASE: {os.getenv('PGDATABASE', 'Not set')}")
+    print(f"PGHOST: {os.getenv('PGHOST', 'Not set')}")
+    print(f"PGPORT: {os.getenv('PGPORT', 'Not set')}")
+    print(f"RAILWAY_TCP_PROXY_DOMAIN: {os.getenv('RAILWAY_TCP_PROXY_DOMAIN', 'Not set')}")
+    print(f"RAILWAY_TCP_PROXY_PORT: {os.getenv('RAILWAY_TCP_PROXY_PORT', 'Not set')}")
+    print()
     
-    # Connection strings to test
-    direct_conn_string = f"postgresql://{pg_user}:{pg_password}@{pg_host}:{pg_port}/{pg_db}"
-    proxy_conn_string = f"postgresql://{pg_user}:{pg_password}@{proxy_domain}:{proxy_port}/{pg_db}"
+    # Test SQLAlchemy connection
+    sqlalchemy_ok = test_sqlalchemy_connection()
     
-    # Test direct connection
-    if test_connection(direct_conn_string, "Direct connection"):
-        logger.info("Direct connection successful")
+    print()
+    
+    # Test psycopg2 connection
+    psycopg2_ok = test_psycopg2_connection()
+    
+    print("\n====== CONNECTION TEST RESULTS ======")
+    print(f"SQLAlchemy connection: {'✅ SUCCESS' if sqlalchemy_ok else '❌ FAILED'}")
+    print(f"psycopg2 connection: {'✅ SUCCESS' if psycopg2_ok else '❌ FAILED'}")
+    
+    if not sqlalchemy_ok and not psycopg2_ok:
+        print("\n❌ All connection methods failed")
+        print("Please check your database credentials and connection settings")
+        return 1
     else:
-        logger.warning("Direct connection failed, trying proxy connection...")
-        
-        if test_connection(proxy_conn_string, "Proxy connection"):
-            logger.info("Proxy connection successful")
-        else:
-            logger.error("All connection attempts failed")
-            sys.exit(1)
-    
-    logger.info("Database connection tests completed successfully")
+        print("\n✅ At least one connection method succeeded")
+        print("Database connection is working")
+        return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
