@@ -6,6 +6,7 @@ import os
 import logging
 import time
 import socket
+import json
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
@@ -36,48 +37,43 @@ def get_database_url():
     Determine the most appropriate database URL to use.
     Tries multiple approaches based on Railway's deployment model.
     """
-    # Option 1: Use fully formed DATABASE_URL from environment
+    # Direct configuration from screenshots
+    pg_user = "postgres"
+    pg_password = os.getenv("POSTGRES_PASSWORD", "eLsHIpQoaRgtqGUMXAGzDXcIKLsIsRSf")
+    pg_db = "railway"
+    pg_port = "5432"
+    pg_host = "postgres.railway.internal"
+    
+    # Option 1: Direct connection to postgres.railway.internal
+    if check_host_connectivity(pg_host, int(pg_port)):
+        logger.info(f"Connected to {pg_host}:{pg_port} successfully")
+        database_url = f"postgresql://{pg_user}:{pg_password}@{pg_host}:{pg_port}/{pg_db}"
+        return database_url
+    
+    # Option 2: Connection using RAILWAY_PRIVATE_DOMAIN
+    private_domain = os.getenv("RAILWAY_PRIVATE_DOMAIN", "web.railway.internal")
+    if check_host_connectivity(private_domain, int(pg_port)):
+        logger.info(f"Connected to {private_domain}:{pg_port} successfully")
+        database_url = f"postgresql://{pg_user}:{pg_password}@{private_domain}:{pg_port}/{pg_db}"
+        return database_url
+    
+    # Option 3: Use DATABASE_URL from environment
     database_url = os.getenv("DATABASE_URL")
     if database_url:
         if "postgres:" in database_url:
             database_url = database_url.replace("postgres:", "postgresql:")
         logger.info(f"Using DATABASE_URL from environment variable")
         return database_url
-
-    # Option 2: Try internal Railway networking
-    pg_host = os.getenv("RAILWAY_PRIVATE_DOMAIN", "postgres.railway.internal")
-    pg_port = 5432
-    if check_host_connectivity(pg_host, pg_port):
-        pg_user = os.getenv("PGUSER", "postgres")
-        pg_pass = os.getenv("POSTGRES_PASSWORD", "")
-        pg_db = os.getenv("PGDATABASE", "railway")
-        
-        database_url = f"postgresql://{pg_user}:{pg_pass}@{pg_host}:{pg_port}/{pg_db}"
-        logger.info(f"Using internal Railway PostgreSQL connection")
-        return database_url
-
-    # Option 3: Use externally accessible DATABASE_PUBLIC_URL
-    database_public_url = os.getenv("DATABASE_PUBLIC_URL")
-    if database_public_url:
-        if "postgres:" in database_public_url:
-            database_public_url = database_public_url.replace("postgres:", "postgresql:")
-        logger.info(f"Using DATABASE_PUBLIC_URL from environment variable")
-        return database_public_url
-
-    # Option 4: Construct external URL from environment variables
-    pg_public_host = os.getenv("RAILWAY_TCP_PROXY_DOMAIN")
-    pg_public_port = os.getenv("RAILWAY_TCP_PROXY_PORT")
     
-    if pg_public_host and pg_public_port:
-        pg_user = os.getenv("PGUSER", "postgres")
-        pg_pass = os.getenv("POSTGRES_PASSWORD", "")
-        pg_db = os.getenv("PGDATABASE", "railway")
-        
-        database_url = f"postgresql://{pg_user}:{pg_pass}@{pg_public_host}:{pg_public_port}/{pg_db}"
-        logger.info(f"Using constructed public PostgreSQL connection")
+    # Option 4: Try TCP proxy via public URL
+    proxy_domain = os.getenv("RAILWAY_TCP_PROXY_DOMAIN")
+    proxy_port = os.getenv("RAILWAY_TCP_PROXY_PORT")
+    if proxy_domain and proxy_port:
+        logger.info(f"Using TCP proxy at {proxy_domain}:{proxy_port}")
+        database_url = f"postgresql://{pg_user}:{pg_password}@{proxy_domain}:{proxy_port}/{pg_db}"
         return database_url
-
-    # Option 5: Fallback to SQLite for local development
+    
+    # Option 5: SQLite fallback
     logger.warning("No PostgreSQL connection configuration found, using SQLite fallback")
     return "sqlite:///./andikar.db"
 
@@ -128,6 +124,18 @@ def create_db_engine():
                     result = conn.execute(text("SELECT 1")).fetchone()
                     if result and result[0] == 1:
                         logger.info(f"Successfully connected to database (attempt {attempt+1})")
+                        
+                        # Print database details for debugging
+                        try:
+                            version = conn.execute(text("SELECT version()")).scalar()
+                            logger.info(f"PostgreSQL version: {version}")
+                            
+                            db_info = conn.execute(text("SELECT current_database(), current_user")).fetchone()
+                            if db_info:
+                                logger.info(f"Database: {db_info[0]}, User: {db_info[1]}")
+                        except Exception as e:
+                            logger.warning(f"Could not get database details: {e}")
+                            
                         return engine
                     
             except Exception as e:
