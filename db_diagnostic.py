@@ -1,27 +1,29 @@
 """
-PostgreSQL diagnostic tool for Andikar Backend API.
-Run this script to check database connectivity and schema.
+Database diagnostic tool for Andikar Backend API.
+This script performs comprehensive connectivity tests for PostgreSQL.
 """
 import os
+import psycopg2
+import logging
 import sys
 import socket
-import logging
 import time
-import traceback
-from sqlalchemy import create_engine, text, inspect
-from sqlalchemy.exc import SQLAlchemyError
+from dotenv import load_dotenv
 
-# Set up logging
+# Load environment variables
+load_dotenv()
+
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger("db-diagnostics")
 
-def print_section(title):
-    """Print a section title with formatting."""
+def print_header(text):
+    """Print a formatted header."""
     print("\n" + "=" * 50)
-    print(f"  {title}")
+    print(f" {text}")
     print("=" * 50)
 
 def check_host_connectivity(host, port, timeout=3):
@@ -29,272 +31,265 @@ def check_host_connectivity(host, port, timeout=3):
     try:
         socket.setdefaulttimeout(timeout)
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect((host, port))
+        s.connect((host, int(port)))
         s.close()
         return True
     except Exception as e:
         logger.warning(f"Host {host}:{port} is not reachable: {str(e)}")
         return False
 
-def get_database_url():
-    """Get the database URL from environment variables."""
-    print_section("DATABASE ENVIRONMENT VARIABLES")
+def get_connection_options():
+    """Get all possible connection options from environment variables."""
+    options = {}
     
-    # Display environment variables (without sensitive info)
-    env_vars = {
-        "DATABASE_URL": os.getenv("DATABASE_URL", "Not set"),
-        "DATABASE_PUBLIC_URL": os.getenv("DATABASE_PUBLIC_URL", "Not set"),
-        "PGUSER": os.getenv("PGUSER", "Not set"),
-        "PGDATABASE": os.getenv("PGDATABASE", "Not set"),
-        "RAILWAY_PRIVATE_DOMAIN": os.getenv("RAILWAY_PRIVATE_DOMAIN", "Not set"),
-        "RAILWAY_TCP_PROXY_DOMAIN": os.getenv("RAILWAY_TCP_PROXY_DOMAIN", "Not set"),
-        "RAILWAY_TCP_PROXY_PORT": os.getenv("RAILWAY_TCP_PROXY_PORT", "Not set"),
-    }
+    # Direct connection parameters
+    options['pg_user'] = os.getenv("PGUSER", "postgres")
+    options['pg_password'] = os.getenv("POSTGRES_PASSWORD", "ztJggTeesPJYVMHRWuGVbnUinMKwCWyI")
+    options['pg_db'] = os.getenv("PGDATABASE", "railway")
+    options['pg_port'] = os.getenv("PGPORT", "5432")
+    options['pg_host'] = os.getenv("PGHOST", "postgres.railway.internal")
     
-    # Print environment variables (hide passwords)
-    for key, value in env_vars.items():
-        if key == "DATABASE_URL" or key == "DATABASE_PUBLIC_URL":
-            # Hide password in URLs
-            if value != "Not set" and "@" in value:
-                parts = value.split("@")
-                auth_part = parts[0].split("://")
-                masked_value = f"{auth_part[0]}://*****@{parts[1]}"
-                print(f"{key}: {masked_value}")
-            else:
-                print(f"{key}: {value}")
-        elif key == "POSTGRES_PASSWORD":
-            print(f"{key}: {'*****' if value != 'Not set' else 'Not set'}")
-        else:
-            print(f"{key}: {value}")
+    # Proxy connection parameters
+    options['proxy_domain'] = os.getenv("RAILWAY_TCP_PROXY_DOMAIN", "ballast.proxy.rlwy.net")
+    options['proxy_port'] = os.getenv("RAILWAY_TCP_PROXY_PORT", "11148")
     
-    # Option 1: Use fully formed DATABASE_URL from environment
-    database_url = os.getenv("DATABASE_URL")
-    if database_url:
-        if "postgres:" in database_url:
-            database_url = database_url.replace("postgres:", "postgresql:")
-        print("\nUsing DATABASE_URL from environment variable")
-        return database_url
+    # Full connection strings
+    options['database_url'] = os.getenv("DATABASE_URL")
+    options['database_public_url'] = os.getenv("DATABASE_PUBLIC_URL")
+    
+    return options
 
-    # Option 2: Try internal Railway networking
-    pg_host = os.getenv("RAILWAY_PRIVATE_DOMAIN", "postgres.railway.internal")
-    pg_port = 5432
-    
-    print(f"\nChecking connectivity to {pg_host}:{pg_port}...")
-    if check_host_connectivity(pg_host, pg_port):
-        pg_user = os.getenv("PGUSER", "postgres")
-        pg_pass = os.getenv("POSTGRES_PASSWORD", "")
-        pg_db = os.getenv("PGDATABASE", "railway")
-        
-        database_url = f"postgresql://{pg_user}:{pg_pass}@{pg_host}:{pg_port}/{pg_db}"
-        print(f"Successfully connected to {pg_host}:{pg_port}")
-        print("Using internal Railway PostgreSQL connection")
-        return database_url
-    else:
-        print(f"Could not connect to {pg_host}:{pg_port}")
-
-    # Option 3: Use externally accessible DATABASE_PUBLIC_URL
-    database_public_url = os.getenv("DATABASE_PUBLIC_URL")
-    if database_public_url:
-        if "postgres:" in database_public_url:
-            database_public_url = database_public_url.replace("postgres:", "postgresql:")
-        print("\nUsing DATABASE_PUBLIC_URL from environment variable")
-        return database_public_url
-
-    # Option 4: Construct external URL from environment variables
-    pg_public_host = os.getenv("RAILWAY_TCP_PROXY_DOMAIN")
-    pg_public_port = os.getenv("RAILWAY_TCP_PROXY_PORT")
-    
-    if pg_public_host and pg_public_port:
-        pg_user = os.getenv("PGUSER", "postgres")
-        pg_pass = os.getenv("POSTGRES_PASSWORD", "")
-        pg_db = os.getenv("PGDATABASE", "railway")
-        
-        database_url = f"postgresql://{pg_user}:{pg_pass}@{pg_public_host}:{pg_public_port}/{pg_db}"
-        print("\nUsing constructed public PostgreSQL connection")
-        return database_url
-
-    # Option 5: Fallback to SQLite for local development
-    print("\nNo PostgreSQL connection configuration found, using SQLite fallback")
-    return "sqlite:///./andikar_diagnostic.db"
-
-def check_database_connection(db_url):
-    """Check database connection and query details."""
-    print_section("DATABASE CONNECTION TEST")
-    
+def test_connection(connection_string, name, password_hint=""):
+    """Test a database connection and return details."""
     try:
-        # Create engine
-        print(f"Connecting to database...")
+        print(f"Testing connection to {name}...")
         
-        # Handle SQLite case differently
-        if db_url.startswith("sqlite"):
-            engine = create_engine(db_url, connect_args={"check_same_thread": False})
-        else:
-            engine = create_engine(
-                db_url,
-                pool_size=1,
-                pool_timeout=30,
-                connect_args={
-                    "connect_timeout": 10,
-                    "application_name": "andikar-diagnostics"
-                }
-            )
+        conn = psycopg2.connect(connection_string, connect_timeout=10)
+        conn.autocommit = True
+        cursor = conn.cursor()
         
-        # Test connection
-        with engine.connect() as conn:
-            result = conn.execute(text("SELECT 1")).fetchone()
-            if result and result[0] == 1:
-                print("✅ Connection successful!")
-            else:
-                print("❌ Connection test failed: Unexpected result")
-                return None
-            
-            # Get server info
-            try:
-                version = conn.execute(text("SELECT version()")).scalar()
-                print(f"\nDatabase version: {version}")
-            except:
-                print("\nCould not get database version")
-            
-            # Get current database and user
-            try:
-                db_info = conn.execute(text("SELECT current_database(), current_user, current_schema")).fetchone()
-                if db_info:
-                    print(f"Current database: {db_info[0]}")
-                    print(f"Current user: {db_info[1]}")
-                    print(f"Current schema: {db_info[2]}")
-            except:
-                try:
-                    db_info = conn.execute(text("SELECT current_database(), current_user")).fetchone()
-                    if db_info:
-                        print(f"Current database: {db_info[0]}")
-                        print(f"Current user: {db_info[1]}")
-                        print(f"Current schema: public (assumed)")
-                except:
-                    print("Could not get current database/user information")
-            
-            return engine
-            
-    except SQLAlchemyError as e:
-        print(f"❌ Database connection error: {str(e)}")
-        print("\nError traceback:")
-        traceback.print_exc()
-        return None
-    except Exception as e:
-        print(f"❌ Unexpected error: {str(e)}")
-        print("\nError traceback:")
-        traceback.print_exc()
-        return None
-
-def list_tables(engine):
-    """List all tables in the database."""
-    if not engine:
-        return
-    
-    print_section("DATABASE TABLES")
-    
-    try:
-        inspector = inspect(engine)
+        print(f"✅ Connection successful!")
         
-        # Get all schemas
-        schemas = inspector.get_schema_names()
-        print(f"Available schemas: {', '.join(schemas)}")
+        # Get database version
+        try:
+            cursor.execute("SELECT version()")
+            version = cursor.fetchone()[0]
+            print(f"PostgreSQL version: {version}")
+        except Exception as e:
+            print(f"Could not get database version: {e}")
         
-        # For each schema, get the tables
-        for schema in schemas:
-            tables = inspector.get_table_names(schema=schema)
+        # Get database/user info
+        try:
+            cursor.execute("SELECT current_database(), current_user")
+            db, user = cursor.fetchone()
+            print(f"Database: {db}, User: {user}")
+        except Exception as e:
+            print(f"Could not get current database/user information: {e}")
+        
+        # Get schemas
+        try:
+            cursor.execute("SELECT schema_name FROM information_schema.schemata")
+            schemas = [row[0] for row in cursor.fetchall()]
+            print(f"Available schemas: {', '.join(schemas)}")
+        except Exception as e:
+            print(f"Could not get schema information: {e}")
+        
+        # Get tables
+        try:
+            cursor.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'")
+            tables = cursor.fetchall()
             if tables:
-                print(f"\nTables in schema '{schema}':")
-                for idx, table in enumerate(tables, 1):
-                    print(f"  {idx}. {table}")
-                    
-                    # Get column information for each table
-                    try:
-                        columns = inspector.get_columns(table, schema=schema)
-                        if columns:
-                            print(f"     Columns:")
-                            for col in columns:
-                                print(f"       - {col['name']} ({col['type']})")
-                    except:
-                        print(f"     Could not get column information")
-            else:
-                print(f"\nNo tables found in schema '{schema}'")
+                table_names = [t[0] for t in tables]
+                print(f"Tables in 'public' schema: {', '.join(table_names)}")
                 
+                # Count rows in each table
+                for table in table_names:
+                    try:
+                        cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                        count = cursor.fetchone()[0]
+                        print(f"  - {table}: {count} rows")
+                    except Exception as e:
+                        print(f"  - {table}: Error counting rows - {str(e)}")
+            else:
+                print("No tables found in 'public' schema")
+        except Exception as e:
+            print(f"Could not get table information: {e}")
+        
+        cursor.close()
+        conn.close()
+        return True
     except Exception as e:
-        print(f"❌ Error listing tables: {str(e)}")
-        traceback.print_exc()
+        print(f"❌ Connection failed: {str(e)}")
+        return False
 
-def check_permissions(engine):
-    """Check database permissions."""
-    if not engine:
-        return
-    
-    print_section("DATABASE PERMISSIONS")
+def test_database_permissions(connection_string):
+    """Test database permissions by creating and modifying a test table."""
+    print_header("DATABASE PERMISSIONS")
     
     try:
-        with engine.connect() as conn:
-            # Try to create a test table
-            print("Testing CREATE TABLE permission...")
-            try:
-                conn.execute(text("CREATE TABLE IF NOT EXISTS _andikar_test_permissions (id serial PRIMARY KEY, test_col VARCHAR(50))"))
-                print("✅ CREATE TABLE: Permission granted")
-            except Exception as e:
-                print(f"❌ CREATE TABLE: Permission denied - {str(e)}")
-            
-            # Try to insert data
-            print("\nTesting INSERT permission...")
-            try:
-                conn.execute(text("INSERT INTO _andikar_test_permissions (test_col) VALUES ('test_value')"))
-                print("✅ INSERT: Permission granted")
-            except Exception as e:
-                print(f"❌ INSERT: Permission denied - {str(e)}")
-            
-            # Try to update data
-            print("\nTesting UPDATE permission...")
-            try:
-                conn.execute(text("UPDATE _andikar_test_permissions SET test_col = 'updated_value' WHERE test_col = 'test_value'"))
-                print("✅ UPDATE: Permission granted")
-            except Exception as e:
-                print(f"❌ UPDATE: Permission denied - {str(e)}")
-            
-            # Try to delete data
-            print("\nTesting DELETE permission...")
-            try:
-                conn.execute(text("DELETE FROM _andikar_test_permissions WHERE test_col = 'updated_value'"))
-                print("✅ DELETE: Permission granted")
-            except Exception as e:
-                print(f"❌ DELETE: Permission denied - {str(e)}")
-            
-            # Clean up the test table
-            print("\nCleaning up test table...")
-            try:
-                conn.execute(text("DROP TABLE IF EXISTS _andikar_test_permissions"))
-                print("✅ DROP TABLE: Permission granted")
-            except Exception as e:
-                print(f"❌ DROP TABLE: Permission denied - {str(e)}")
-                
+        # Connect to the database
+        conn = psycopg2.connect(connection_string, connect_timeout=10)
+        conn.autocommit = True
+        cursor = conn.cursor()
+        
+        # Test CREATE TABLE permission
+        print("Testing CREATE TABLE permission...")
+        try:
+            cursor.execute("CREATE TABLE IF NOT EXISTS _diagnostic_test (id SERIAL PRIMARY KEY, test_text VARCHAR(255))")
+            print("✅ CREATE TABLE: Permission granted")
+        except Exception as e:
+            print(f"❌ CREATE TABLE: Permission denied - {str(e)}")
+            conn.close()
+            return False
+        
+        # Test INSERT permission
+        print("\nTesting INSERT permission...")
+        try:
+            cursor.execute("INSERT INTO _diagnostic_test (test_text) VALUES ('test data')")
+            print("✅ INSERT: Permission granted")
+        except Exception as e:
+            print(f"❌ INSERT: Permission denied - {str(e)}")
+            conn.close()
+            return False
+        
+        # Test UPDATE permission
+        print("\nTesting UPDATE permission...")
+        try:
+            cursor.execute("UPDATE _diagnostic_test SET test_text = 'updated test data' WHERE test_text = 'test data'")
+            print("✅ UPDATE: Permission granted")
+        except Exception as e:
+            print(f"❌ UPDATE: Permission denied - {str(e)}")
+            conn.close()
+            return False
+        
+        # Test DELETE permission
+        print("\nTesting DELETE permission...")
+        try:
+            cursor.execute("DELETE FROM _diagnostic_test WHERE test_text = 'updated test data'")
+            print("✅ DELETE: Permission granted")
+        except Exception as e:
+            print(f"❌ DELETE: Permission denied - {str(e)}")
+            conn.close()
+            return False
+        
+        # Clean up
+        print("\nCleaning up test table...")
+        try:
+            cursor.execute("DROP TABLE _diagnostic_test")
+            print("✅ DROP TABLE: Permission granted")
+        except Exception as e:
+            print(f"❌ DROP TABLE: Permission denied - {str(e)}")
+            conn.close()
+            return False
+        
+        conn.close()
+        return True
     except Exception as e:
-        print(f"❌ Error checking permissions: {str(e)}")
-        traceback.print_exc()
+        print(f"❌ Permission test failed: {str(e)}")
+        return False
 
-def run_diagnostic():
-    """Run the database diagnostic tests."""
-    print("\n🔍 Andikar Database Diagnostic Tool 🔍")
+def main():
+    """Run comprehensive database diagnostics."""
+    print("🔍 Andikar Database Diagnostic Tool 🔍")
     print("This tool checks database connectivity and configuration.")
     
-    # Step 1: Get database URL
-    db_url = get_database_url()
+    # Get all connection options
+    options = get_connection_options()
     
-    # Step 2: Check connection
-    engine = check_database_connection(db_url)
+    # Print environment variables
+    print_header("DATABASE ENVIRONMENT VARIABLES")
+    env_vars = [
+        ("DATABASE_URL", options.get('database_url', "Not set")),
+        ("DATABASE_PUBLIC_URL", options.get('database_public_url', "Not set")),
+        ("PGUSER", options.get('pg_user', "Not set")),
+        ("PGDATABASE", options.get('pg_db', "Not set")),
+        ("PGHOST", options.get('pg_host', "Not set")),
+        ("PGPORT", options.get('pg_port', "Not set")),
+        ("RAILWAY_TCP_PROXY_DOMAIN", options.get('proxy_domain', "Not set")),
+        ("RAILWAY_TCP_PROXY_PORT", options.get('proxy_port', "Not set"))
+    ]
     
-    # Step 3: List tables
-    if engine:
-        list_tables(engine)
-        
-        # Step 4: Check permissions
-        check_permissions(engine)
+    for name, value in env_vars:
+        if name == "DATABASE_URL" and value != "Not set":
+            parts = value.split(":")
+            masked = f"{parts[0]}:{parts[1]}:****@" + value.split("@")[1]
+            print(f"{name}: {masked}")
+        elif name == "DATABASE_PUBLIC_URL" and value != "Not set":
+            parts = value.split(":")
+            masked = f"{parts[0]}:{parts[1]}:****@" + value.split("@")[1]
+            print(f"{name}: {masked}")
+        elif name != "POSTGRES_PASSWORD":
+            print(f"{name}: {value}")
+    
+    # Test connectivity to hosts
+    proxy_host = options.get('proxy_domain')
+    proxy_port = options.get('proxy_port')
+    if proxy_host and proxy_port:
+        print(f"\nChecking connectivity to {proxy_host}:{proxy_port}...")
+        if check_host_connectivity(proxy_host, proxy_port):
+            print(f"✅ Connection to {proxy_host}:{proxy_port} is available")
+        else:
+            print(f"❌ Could not connect to {proxy_host}:{proxy_port}")
+    
+    pg_host = options.get('pg_host')
+    pg_port = options.get('pg_port')
+    if pg_host and pg_port:
+        print(f"\nChecking connectivity to {pg_host}:{pg_port}...")
+        if check_host_connectivity(pg_host, pg_port):
+            print(f"✅ Connection to {pg_host}:{pg_port} is available")
+        else:
+            print(f"❌ Could not connect to {pg_host}:{pg_port}")
+    
+    # Test database connections
+    print_header("DATABASE CONNECTION TEST")
+    
+    # Build connection strings
+    connection_strings = []
+    
+    # Priority 1: Proxy connection (most reliable in Railway)
+    if proxy_host and proxy_port:
+        proxy_conn_string = f"postgresql://{options.get('pg_user')}:{options.get('pg_password')}@{proxy_host}:{proxy_port}/{options.get('pg_db')}"
+        connection_strings.append((proxy_conn_string, "Railway TCP Proxy"))
+    
+    # Priority 2: Direct database URL if set
+    if options.get('database_url'):
+        db_url = options.get('database_url')
+        if db_url.startswith("postgres:"):
+            db_url = db_url.replace("postgres:", "postgresql:")
+        connection_strings.append((db_url, "DATABASE_URL"))
+    
+    # Priority 3: Public database URL if set
+    if options.get('database_public_url'):
+        db_public_url = options.get('database_public_url')
+        if db_public_url.startswith("postgres:"):
+            db_public_url = db_public_url.replace("postgres:", "postgresql:")
+        connection_strings.append((db_public_url, "DATABASE_PUBLIC_URL"))
+    
+    # Priority 4: Direct internal connection
+    if pg_host and pg_port:
+        direct_conn_string = f"postgresql://{options.get('pg_user')}:{options.get('pg_password')}@{pg_host}:{pg_port}/{options.get('pg_db')}"
+        connection_strings.append((direct_conn_string, "Direct internal connection"))
+    
+    # Test each connection
+    success = False
+    working_connection = None
+    
+    for conn_string, name in connection_strings:
+        if test_connection(conn_string, name):
+            success = True
+            working_connection = conn_string
+            break
+        print(f"Trying next connection method...")
+    
+    if not success:
+        print("❌ All connection attempts failed")
+        return
+    
+    # Test database permissions
+    if working_connection:
+        test_database_permissions(working_connection)
     
     print("\n✨ Diagnostic Complete ✨")
-    
+
 if __name__ == "__main__":
-    run_diagnostic()
+    main()
